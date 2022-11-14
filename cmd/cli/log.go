@@ -10,10 +10,6 @@ import (
 	"github.com/spf13/cobra"
 )
 
-const (
-	podName = "pod"
-)
-
 var logCmd = &cobra.Command{
 	Use:   "log",
 	Short: "show log of a pod",
