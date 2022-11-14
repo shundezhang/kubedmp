@@ -1,4 +1,4 @@
-module github.com/shundezhang/k8sinfo
+module github.com/shundezhang/kubedmp
 
 go 1.14
 

@@ -13,7 +13,7 @@ var (
 )
 
 var rootCmd = &cobra.Command{
-	Use:   "k8sinfo",
+	Use:   "kubedmp",
 	Short: "show k8s cluster-info dump",
 	Long:  "show k8s cluster-info dump",
 }

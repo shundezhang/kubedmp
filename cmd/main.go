@@ -1,6 +1,6 @@
 package main
 
-import "github.com/shundezhang/k8sinfo/cmd/cli"
+import "github.com/shundezhang/kubedmp/cmd/cli"
 
 func main() {
 	cli.Execute()

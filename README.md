@@ -1,4 +1,4 @@
-# k8sinfo
+# kubedmp
 
 Display k8s cluster dump nicely
 
