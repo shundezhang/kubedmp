@@ -1,5 +1,10 @@
 
 export GO111MODULE=on
+EXECUTABLE=kubedmp
+WINDOWS=$(EXECUTABLE)_windows_amd64.exe
+LINUX=$(EXECUTABLE)_linux_amd64
+DARWIN=$(EXECUTABLE)_darwin_amd64
+VERSION=$(shell git describe --tags --always --long --dirty)
 
 .PHONY: test
 test:
@@ -7,7 +12,9 @@ test:
 
 .PHONY: bin
 bin: fmt vet
-	go build -o bin/kubedmp github.com/shundezhang/kubedmp/cmd
+	# go build -o bin/kubedmp github.com/shundezhang/kubedmp/cmd
+	env GOOS=linux GOARCH=amd64 go build -v -o bin/$(LINUX) -ldflags="-s -w -X main.version=$(VERSION)" ./cmd/main.go
+	env GOOS=darwin GOARCH=amd64 go build -v -o bin/$(DARWIN) -ldflags="-s -w -X main.version=$(VERSION)" ./cmd/main.go
 
 .PHONY: fmt
 fmt:
