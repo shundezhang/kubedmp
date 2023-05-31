@@ -29,15 +29,19 @@ var getCmd = &cobra.Command{
 		}
 
 		if len(args) == 0 {
-			log.Fatalf("Please specify a type, e.g. pod, svc, deploy, daemonset, event\n")
+			fmt.Printf("Please specify a type, e.g. node/no, pod, svc/service, deploy/deployment, daemonset, event\n")
 			return
 		}
 		queryType := args[0]
-		var objectName string
+		objectName := ""
 		if len(args) > 1 {
 			objectName = args[1]
 		}
-		fmt.Printf("parsing dump file %s\n", dumpFile)
+		if !contains([]string{"no", "node", "po", "pod"}, queryType) {
+			fmt.Printf("%s is not a supported resource.\n", queryType)
+			return
+		}
+		fmt.Printf("In get: parsing dump file %s\n", dumpFile)
 		show(dumpFile, func(buffer string, queryType, namespace, objectName string) {
 			var result map[string]interface{}
 			// fmt.Println(buffer)
@@ -47,6 +51,16 @@ var getCmd = &cobra.Command{
 				fmt.Println(buffer)
 				return
 			}
+			switch queryType {
+			case "no", "node":
+				if result["kind"] == "NodeList" {
+					prettyPrintNodeList(result["items"].([]interface{}), objectName)
+				}
+			case "po", "pod":
+				if result["kind"] == "PodList" {
+					prettyPrintPodList(result["items"].([]interface{}), namespace, objectName)
+				}
+			}
 		}, queryType, namespace, objectName)
 
 	},
@@ -55,4 +69,13 @@ var getCmd = &cobra.Command{
 func init() {
 	rootCmd.AddCommand(getCmd)
 	getCmd.Flags().String(ns, "kube-system", "namespace")
+}
+
+func contains(s []string, e string) bool {
+	for _, a := range s {
+		if a == e {
+			return true
+		}
+	}
+	return false
 }

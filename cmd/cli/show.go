@@ -25,9 +25,9 @@ func prettyPrint(buffer string, queryType, namespace, objectName string) {
 	} else {
 		switch result["kind"] {
 		case "NodeList":
-			prettyPrintNodeList(result["items"].([]interface{}))
+			prettyPrintNodeList(result["items"].([]interface{}), "")
 		case "PodList":
-			prettyPrintPodList(result["items"].([]interface{}))
+			prettyPrintPodList(result["items"].([]interface{}), "", "")
 		case "ServiceList":
 			prettyPrintServiceList(result["items"].([]interface{}))
 		case "DeploymentList":
