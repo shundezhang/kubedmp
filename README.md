@@ -1,7 +1,14 @@
 # kubedmp
 
-Display k8s cluster dump nicely
+Display k8s cluster info dump output nicely
+
+Run from source
 
 ```
-cat cluster-info-dump | go run main.go 
+go run cmd/main.go -f ~/cluster-info-dump get po
+```
+
+Build binary
+```
+make bin
 ```

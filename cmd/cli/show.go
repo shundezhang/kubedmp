@@ -8,14 +8,14 @@ import (
 	"github.com/spf13/cobra"
 )
 
-func prettyPrint(buffer string, queryType, namespace, objectName string) {
+func prettyPrint(buffer string, queryType, namespace, objectName string) []interface{} {
 	var result map[string]interface{}
 	// fmt.Println(buffer)
 	err := json.Unmarshal([]byte(buffer), &result)
 	if err != nil {
 		fmt.Println(err.Error())
 		fmt.Println(buffer)
-		return
+		return nil
 	}
 	fmt.Println("Kind: ", result["kind"])
 	fmt.Println("================================================")
@@ -25,9 +25,9 @@ func prettyPrint(buffer string, queryType, namespace, objectName string) {
 	} else {
 		switch result["kind"] {
 		case "NodeList":
-			prettyPrintNodeList(result["items"].([]interface{}), "")
+			prettyPrintNodeList(result["items"].([]interface{}))
 		case "PodList":
-			prettyPrintPodList(result["items"].([]interface{}), "", "")
+			prettyPrintPodList(result["items"].([]interface{}))
 		case "ServiceList":
 			prettyPrintServiceList(result["items"].([]interface{}))
 		case "DeploymentList":
@@ -39,6 +39,7 @@ func prettyPrint(buffer string, queryType, namespace, objectName string) {
 		}
 	}
 	fmt.Println()
+	return nil
 }
 
 var showCmd = &cobra.Command{

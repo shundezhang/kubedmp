@@ -11,9 +11,9 @@ import (
 	"time"
 )
 
-type process func(string, string, string, string)
+type PickItem func(string, string, string, string) []interface{}
 
-func prettyPrintNodeList(items []interface{}, itemName string) {
+func prettyPrintNodeList(items []interface{}) {
 	writer := tabwriter.NewWriter(os.Stdout, 0, 8, 1, '\t', tabwriter.AlignRight)
 	fmt.Fprintln(writer, "NAME\tSTATUS\tROLES\tAGE\tVERSION\tINTERNAL-IP\tEXTERNAL-IP\tOS-IMAGE\tKERNEL-VERSION\tCONTAINER-RUNTIME")
 	for _, item := range items {
@@ -21,9 +21,7 @@ func prettyPrintNodeList(items []interface{}, itemName string) {
 		node := item.(map[string]interface{})
 		metadata := node["metadata"].(map[string]interface{})
 		nodeName := metadata["name"].(string)
-		if itemName != "" && nodeName != itemName {
-			continue
-		}
+
 		// fmt.Println("item: ", reflect.TypeOf(node["status"]).String())
 		status := node["status"].(map[string]interface{})
 		addresses := status["addresses"].([]interface{})
@@ -89,15 +87,15 @@ func prettyPrintNodeList(items []interface{}, itemName string) {
 	writer.Flush()
 }
 
-func prettyPrintPodList(items []interface{}, namespace string, podName string) {
+func prettyPrintPodList(items []interface{}) {
 	writer := tabwriter.NewWriter(os.Stdout, 0, 8, 1, '\t', tabwriter.AlignRight)
 	fmt.Fprintln(writer, "NAMESPACE\tNAME\tREADY\tSTATUS\tRESTARTS\tAGE\tIP\tNODE")
 	for _, item := range items {
 		// fmt.Println("item: ", reflect.TypeOf(item).String())
 		pod := item.(map[string]interface{})
 		// fmt.Println("item: ", reflect.TypeOf(node["status"]).String())
-		status := pod["status"].(map[string]interface{})
 		metadata := pod["metadata"].(map[string]interface{})
+		status := pod["status"].(map[string]interface{})
 		spec := pod["spec"].(map[string]interface{})
 		// hostIP, ok := status["hostIP"]
 		// if !ok {
@@ -216,11 +214,11 @@ func prettyPrintEventList(items []interface{}) {
 	writer.Flush()
 }
 
-func show(dumpFilename string, fn process, queryType, namespace, objectName string) {
+func show(dumpFilename string, pi PickItem, queryType, namespace, objectName string) {
 	var buffer string
 	var inject bool
 
-	fmt.Printf("In parse.show: parsing dump file %s\n", dumpFilename)
+	// fmt.Printf("In parse.show: parsing dump file %s\n", dumpFilename)
 	//scanner := bufio.NewScanner(os.Stdin)
 	// r := bufio.NewReaderSize(os.Stdin, 500*1024)
 
@@ -230,6 +228,7 @@ func show(dumpFilename string, fn process, queryType, namespace, objectName stri
 	}
 
 	scanner := bufio.NewScanner(f)
+	items := []interface{}{}
 	for scanner.Scan() {
 		line := scanner.Text()
 		if line == "{" {
@@ -238,7 +237,9 @@ func show(dumpFilename string, fn process, queryType, namespace, objectName stri
 		} else if line == "}" {
 			buffer += line
 			inject = false
-			fn(buffer, queryType, namespace, objectName)
+			for _, item := range pi(buffer, queryType, namespace, objectName) {
+				items = append(items, item)
+			}
 			buffer = ""
 		} else if inject {
 			buffer += line
@@ -246,6 +247,20 @@ func show(dumpFilename string, fn process, queryType, namespace, objectName stri
 	}
 
 	f.Close()
+	// fmt.Println(items)
+	switch queryType {
+	case "no", "node":
+		prettyPrintNodeList(items)
+	case "po", "pod":
+		prettyPrintPodList(items)
+	case "svc", "service":
+		prettyPrintServiceList(items)
+	case "deploy", "deployment":
+		prettyPrintDeploymentList(items)
+	case "ds", "daemonset":
+		prettyPrintDaemonSetList(items)
+	}
+
 	// if err := scanner.Err(); err != nil {
 	// 	log.Println(err)
 	// }
