@@ -34,6 +34,8 @@ func prettyPrint(buffer string, queryType, namespace, objectName string) []inter
 			prettyPrintDeploymentList(result["items"].([]interface{}))
 		case "DaemonSetList":
 			prettyPrintDaemonSetList(result["items"].([]interface{}))
+		case "ReplicaSetList":
+			prettyPrintReplicaSetList(result["items"].([]interface{}))
 		case "EventList":
 			prettyPrintEventList(result["items"].([]interface{}))
 		}

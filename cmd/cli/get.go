@@ -42,7 +42,7 @@ var getCmd = &cobra.Command{
 		if len(args) > 1 {
 			objectName = args[1]
 		}
-		if !contains([]string{"no", "node", "po", "pod", "svc", "service", "deploy", "deployment", "ds", "daemonset"}, queryType) {
+		if !contains([]string{"no", "node", "po", "pod", "svc", "service", "deploy", "deployment", "ds", "daemonset", "rs", "replicaset", "event"}, queryType) {
 			fmt.Printf("%s is not a supported resource.\n", queryType)
 			return
 		}
@@ -85,6 +85,14 @@ var getCmd = &cobra.Command{
 				}
 			case "ds", "daemonset":
 				if result["kind"] == "DaemonSetList" {
+					items = findItems(result["items"].([]interface{}), allNS, namespace, objectName)
+				}
+			case "rs", "replicaset":
+				if result["kind"] == "ReplicaSetList" {
+					items = findItems(result["items"].([]interface{}), allNS, namespace, objectName)
+				}
+			case "event":
+				if result["kind"] == "EventList" {
 					items = findItems(result["items"].([]interface{}), allNS, namespace, objectName)
 				}
 			}
