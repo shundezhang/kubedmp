@@ -94,12 +94,20 @@ func describeObject(buffer, queryType, namespace, objectName string) {
 		// fmt.Println("item: ", reflect.TypeOf(node["status"]).String())
 		metadata := obj["metadata"].(map[string]interface{})
 		// fmt.Printf("object ns %s pod %s \n", metadata["namespace"], metadata["name"])
-		if (queryType == "no" || queryType == "node") && objectName == metadata["name"] {
+		if (queryType == "no" || queryType == "node") && objectName == metadata["name"] && result["kind"] == "NodeList" {
 			describeNode(item)
-		} else if (queryType == "po" || queryType == "pod") && objectName == metadata["name"] && namespace == metadata["namespace"] {
+		} else if (queryType == "po" || queryType == "pod") && objectName == metadata["name"] && namespace == metadata["namespace"] && result["kind"] == "PodList" {
 			describePod(item)
-		} else if namespace == metadata["namespace"] && objectName == metadata["name"] {
-			fmt.Println("item: ", item)
+		} else if (queryType == "svc" || queryType == "service") && objectName == metadata["name"] && namespace == metadata["namespace"] && result["kind"] == "ServiceList" {
+			describeService(item)
+		} else if (queryType == "deploy" || queryType == "deployment") && objectName == metadata["name"] && namespace == metadata["namespace"] && result["kind"] == "DeploymentList" {
+			describeDeployment(item)
+		} else if (queryType == "ds" || queryType == "daemonset") && objectName == metadata["name"] && namespace == metadata["namespace"] && result["kind"] == "DaemonSetList" {
+			describeDaemonSet(item)
+		} else if (queryType == "rs" || queryType == "replicaset") && objectName == metadata["name"] && namespace == metadata["namespace"] && result["kind"] == "ReplicaSetList" {
+			describeReplicaSet(item)
+			// } else if namespace == metadata["namespace"] && objectName == metadata["name"] {
+			// 	fmt.Println("item: ", item)
 		}
 
 	}
@@ -256,18 +264,7 @@ func describePod(item interface{}) {
 
 	creationTimeStr := metadata["creationTimestamp"].(string)
 	// fmt.Println("metadata: ", metadata)
-	labels := metadata["labels"].(map[string]interface{})
 
-	labelList := []string{}
-	annotationList := []string{}
-	for k, v := range labels {
-		labelList = append(labelList, k+"="+v.(string))
-	}
-	if annotations, ok := metadata["annotations"].(map[string]interface{}); ok {
-		for k, v := range annotations {
-			annotationList = append(annotationList, k+": "+v.(string))
-		}
-	}
 	writer := tabwriter.NewWriter(os.Stdout, 0, 8, 1, '\t', tabwriter.AlignRight)
 	fmt.Fprintf(writer, "Name:\t%s\n", metadata["name"])
 	fmt.Fprintf(writer, "Namespace:\t%s\n", metadata["namespace"])
@@ -282,29 +279,10 @@ func describePod(item interface{}) {
 	if err == nil {
 		fmt.Fprintf(writer, "Start Time:\t%s\n", creationTime.Format(time.RFC1123Z))
 	}
-	if len(labelList) == 0 {
-		fmt.Fprintf(writer, "Labels:\t<none>\n")
-	} else {
-		for i, v := range labelList {
-			if i == 0 {
-				fmt.Fprintf(writer, "Labels:\t%s\n", v)
-			} else {
-				fmt.Fprintf(writer, " \t%s\n", v)
-			}
-		}
-	}
-	if len(annotationList) == 0 {
-		fmt.Fprintf(writer, "annotationList:\t<none>\n")
-	} else {
-		for i, v := range annotationList {
-			if i == 0 {
-				fmt.Fprintf(writer, "Annotations:\t%s\n", v)
-			} else {
-				fmt.Fprintf(writer, " \t%s\n", v)
-			}
-		}
 
-	}
+	describeLabels(writer, metadata["labels"])
+	describeAnnotations(writer, metadata["annotations"])
+
 	fmt.Fprintf(writer, "Status:\t%s\n", status["phase"])
 
 	if podIP, ok := status["podIP"]; ok {
@@ -682,4 +660,163 @@ func describePod(item interface{}) {
 	// events
 	writer.Flush()
 
+}
+
+func describeService(item interface{}) {
+	pod := item.(map[string]interface{})
+	metadata := pod["metadata"].(map[string]interface{})
+	status := pod["status"].(map[string]interface{})
+	spec := pod["spec"].(map[string]interface{})
+	writer := tabwriter.NewWriter(os.Stdout, 0, 8, 1, '\t', tabwriter.AlignRight)
+	fmt.Fprintf(writer, "Name:\t%s\n", metadata["name"])
+	fmt.Fprintf(writer, "Namespace:\t%s\n", metadata["namespace"])
+	if labels, ok := metadata["labels"].(map[string]interface{}); ok {
+		describeLabels(writer, labels)
+	} else {
+		describeLabels(writer, map[string]interface{}{})
+	}
+	if annotations, ok := metadata["annotations"].(map[string]interface{}); ok {
+		describeAnnotations(writer, annotations)
+	} else {
+		describeAnnotations(writer, map[string]interface{}{})
+	}
+	if selector, ok1 := spec["selector"].(map[string]interface{}); ok1 {
+		idx := 0
+		for k, v := range selector {
+			if idx == 0 {
+				fmt.Fprintf(writer, "Selector:\t%s=%s", k, v)
+			} else {
+				fmt.Fprintf(writer, ",%s=%s", k, v)
+			}
+			idx++
+		}
+		fmt.Fprintf(writer, "\n")
+	}
+	fmt.Fprintf(writer, "Type:\t%s\n", spec["type"])
+	fmt.Fprintf(writer, "IP Family Policy:\t%s\n", spec["ipFamilyPolicy"])
+	if ipFamilies, ok := spec["ipFamilies"].([]interface{}); ok {
+		famList := []string{}
+		for _, fam := range ipFamilies {
+			famList = append(famList, fam.(string))
+		}
+		fmt.Fprintf(writer, "IP Families:\t%s\n", strings.Join(famList, ","))
+	} else {
+		fmt.Fprintf(writer, "IP Families:\t<none>\n")
+	}
+	fmt.Fprintf(writer, "IP:\t%s\n", spec["clusterIP"])
+	if clusterIPs, ok := spec["clusterIPs"].([]interface{}); ok {
+		ipList := []string{}
+		for _, ip := range clusterIPs {
+			ipList = append(ipList, ip.(string))
+		}
+		fmt.Fprintf(writer, "IPs:\t%s\n", strings.Join(ipList, ","))
+	} else {
+		fmt.Fprintf(writer, "IPs:\t<none>\n")
+	}
+	if externalIPs, ok := spec["externalIPs"].([]interface{}); ok {
+		ipList := []string{}
+		for _, ip := range externalIPs {
+			ipList = append(ipList, ip.(string))
+		}
+		fmt.Fprintf(writer, "External IPs:\t%s\n", strings.Join(ipList, ","))
+	}
+	if loadBalancerIP, ok := spec["loadBalancerIP"]; ok {
+		fmt.Fprintf(writer, "IP:\t%s\n", loadBalancerIP)
+	}
+	if externalName, ok := spec["externalName"]; ok {
+		fmt.Fprintf(writer, "External Name:\t%s\n", externalName)
+	}
+	if loadBalancer, ok := status["loadBalancer"].(map[string]interface{}); ok {
+		if ingress, ok1 := loadBalancer["ingress"].([]interface{}); ok1 {
+			ingList := []string{}
+			for _, ing := range ingress {
+				ingMap := ing.(map[string]interface{})
+				if _, ok2 := ingMap["ip"]; ok2 && ingMap["ip"] != "" {
+					ingList = append(ingList, ingMap["ip"].(string))
+				} else {
+					ingList = append(ingList, ingMap["hostname"].(string))
+				}
+
+			}
+			fmt.Fprintf(writer, "LoadBalancer Ingress:\t%s\n", strings.Join(ingList, ","))
+		}
+	}
+	ports := spec["ports"].([]interface{})
+	for _, port := range ports {
+		portMap := port.(map[string]interface{})
+		portName := portMap["name"]
+		// fmt.Println(portName)
+		if portName == nil || portName == "" {
+			portName = "<unset>"
+		}
+		fmt.Fprintf(writer, "Port:\t%s\t%v/%s\n", portName, portMap["port"], portMap["protocol"])
+		fmt.Fprintf(writer, "TargetPort:\t%v/%s\n", portMap["targetPort"], portMap["protocol"])
+	}
+	// fmt.Fprintf(writer, "Endpoints:\t%s\n", spec["type"])
+	fmt.Fprintf(writer, "Session Affinity:\t%s\n", spec["sessionAffinity"])
+	if externalTrafficPolicy, ok := spec["externalTrafficPolicy"]; ok {
+		fmt.Fprintf(writer, "External Traffic Policy:\t%s\n", externalTrafficPolicy)
+	}
+	if healthCheckNodePort, ok := spec["healthCheckNodePort"]; ok {
+		fmt.Fprintf(writer, "HealthCheck NodePort:\t%v\n", healthCheckNodePort)
+	}
+	if loadBalancerSourceRanges, ok := spec["loadBalancerSourceRanges"].([]interface{}); ok {
+		srcList := []string{}
+		for _, srcRange := range loadBalancerSourceRanges {
+			srcList = append(srcList, srcRange.(string))
+		}
+		fmt.Fprintf(writer, "LoadBalancer Source Ranges:\t%s\n", strings.Join(srcList, ","))
+	}
+	writer.Flush()
+}
+func describeDeployment(item interface{}) {
+}
+
+func describeDaemonSet(item interface{}) {
+}
+
+func describeReplicaSet(item interface{}) {
+}
+
+func describeLabels(writer *tabwriter.Writer, labels interface{}) {
+	labelList := []string{}
+	if labels != nil {
+		labelMap := labels.(map[string]interface{})
+		for k, v := range labelMap {
+			labelList = append(labelList, k+"="+v.(string))
+		}
+	}
+	if len(labelList) == 0 {
+		fmt.Fprintf(writer, "Labels:\t<none>\n")
+	} else {
+		for i, v := range labelList {
+			if i == 0 {
+				fmt.Fprintf(writer, "Labels:\t%s\n", v)
+			} else {
+				fmt.Fprintf(writer, " \t%s\n", v)
+			}
+		}
+	}
+}
+
+func describeAnnotations(writer *tabwriter.Writer, annotations interface{}) {
+	annotationList := []string{}
+	if annotations != nil {
+		lannotationMap := annotations.(map[string]interface{})
+		for k, v := range lannotationMap {
+			annotationList = append(annotationList, k+": "+v.(string))
+		}
+	}
+	if len(annotationList) == 0 {
+		fmt.Fprintf(writer, "Annotations:\t<none>\n")
+	} else {
+		for i, v := range annotationList {
+			if i == 0 {
+				fmt.Fprintf(writer, "Annotations:\t%s\n", v)
+			} else {
+				fmt.Fprintf(writer, " \t%s\n", v)
+			}
+		}
+
+	}
 }
