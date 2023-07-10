@@ -4,18 +4,30 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/shundezhang/kubedmp/cmd/build"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
 
 var (
-	dumpFile = "dumpfile"
+	dumpFile   = "dumpfile"
+	getVersion bool
 )
 
 var rootCmd = &cobra.Command{
 	Use:   "kubedmp",
 	Short: "show k8s cluster-info dump",
 	Long:  "show k8s cluster-info dump",
+	Run: func(cmd *cobra.Command, args []string) {
+		if getVersion {
+			fmt.Println("Version:\t", build.Version)
+			fmt.Println("build.Time:\t", build.Time)
+			fmt.Println("build.User:\t", build.User)
+			os.Exit(0)
+		}
+		cmd.Help()
+		os.Exit(0)
+	},
 }
 
 func Execute() {
@@ -27,7 +39,8 @@ func Execute() {
 
 func init() {
 	cobra.OnInitialize(initConfig)
-	rootCmd.PersistentFlags().StringP(dumpFile, "f", "./cluster-info-dump", "Path to dump file")
+	rootCmd.PersistentFlags().StringP(dumpFile, "f", "./cluster-info.dump", "Path to dump file")
+	rootCmd.Flags().BoolVarP(&getVersion, "version", "v", false, "get version")
 }
 
 func initConfig() {
