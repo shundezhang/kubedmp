@@ -1,0 +1,23 @@
+name: kubedmp
+summary: Display kubectl cluster-info dump output in a human readable way 
+description: |
+      kubectl cluster-info dump writes data in yaml format. This tool displays
+      them in a format similar to output of kubectl get/describe resources.
+version: git
+grade: stable
+base: core20
+
+confinement: devmode
+
+apps:
+  kubedmp:
+    command: bin/kubedmp
+    plugs:
+      - home
+parts:
+  kubedmp:
+    plugin: go
+    source-type: git
+    source: https://github.com/shundezhang/kubedmp
+    override-build: |
+      make bin

@@ -17,7 +17,7 @@ jobs:
       - name: build
         run: make build
       - name: version
-        run: echo "::set-output name=version::$(./bin/kubedmp -v | grep Version | cut -f2 -d' ')"
+        run: echo "version=$(./bin/kubedmp -v | grep Version | cut -f2 -d' ')" >> $GITHUB_OUTPUT
         id: version
       - name: build artifacts
         run: make bin
