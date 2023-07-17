@@ -17,7 +17,8 @@ apps:
 parts:
   kubedmp:
     plugin: go
-    source-type: git
-    source: https://github.com/shundezhang/kubedmp
+    source: .
+    build-packages:
+    - zip
     override-build: |
       make bin
