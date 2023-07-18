@@ -8,11 +8,6 @@ import (
 	"github.com/spf13/cobra"
 )
 
-const (
-	ns = "namespace"
-	an = "all-namespaces"
-)
-
 var getCmd = &cobra.Command{
 	Use:   "get",
 	Short: "get a resource or resources",

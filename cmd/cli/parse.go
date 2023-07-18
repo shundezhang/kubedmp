@@ -221,7 +221,7 @@ func prettyPrintDaemonSetList(items []interface{}) {
 		// fmt.Println("name: ", metadata["name"])
 		nodeSelectorList := []string{}
 		if _, ok := templateSpec["nodeSelector"]; ok {
-			fmt.Println("nodeSelector: ", templateSpec["nodeSelector"])
+			// fmt.Println("nodeSelector: ", templateSpec["nodeSelector"])
 			nodeSelector := templateSpec["nodeSelector"].(map[string]interface{})
 			for k, v := range nodeSelector {
 				nodeSelectorList = append(nodeSelectorList, k+"="+v.(string))

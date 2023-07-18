@@ -14,6 +14,11 @@ var (
 	getVersion bool
 )
 
+const (
+	ns = "namespace"
+	an = "all-namespaces"
+)
+
 var rootCmd = &cobra.Command{
 	Use:   "kubedmp",
 	Short: "show k8s cluster-info dump",

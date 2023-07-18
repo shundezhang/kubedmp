@@ -3,7 +3,7 @@ summary: Display kubectl cluster-info dump output in a human readable way
 description: |
       kubectl cluster-info dump writes data in yaml format. This tool displays
       them in a format similar to output of kubectl get/describe resources.
-version: git
+adopt-info: kubedmp
 grade: stable
 base: core20
 
@@ -18,7 +18,10 @@ parts:
   kubedmp:
     plugin: go
     source: .
-    build-packages:
-    - zip
+    override-pull: |
+      snapcraftctl pull
+      snapcraftctl set-version “$(git describe —-tags)”
     override-build: |
-      make bin
+      make build
+      mkdir -p $SNAPCRAFT_PART_INSTALL/bin/
+      mv bin/kubedmp $SNAPCRAFT_PART_INSTALL/bin/
