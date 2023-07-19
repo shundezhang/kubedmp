@@ -59,6 +59,8 @@ changelog:
 
 release:
   prerelease: auto
+  extra_files:
+    - glob: ./CHANGELOG.md
 
 brews:
 - name: kubedmp
