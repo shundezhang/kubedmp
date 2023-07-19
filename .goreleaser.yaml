@@ -1,0 +1,68 @@
+project_name: kubedmp
+
+env:
+    # enable GO111Modules if you are using Go1.11 modules in your project for dependency management
+    - GO111MODULE=on
+    # Disable CGO - We will go more into this later
+    - CGO_ENABLED=0
+
+before:
+    hooks:
+        # Remove unused packaged from the build process
+        - go mod tidy
+        # You may remove this if you don't use go modules - Downloads all modules specified in go.mod
+        - go mod download
+
+builds:
+  - binary: kubedmp
+    main: ./cmd/main.go
+    goos:
+      - darwin
+      - linux
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    targets:
+      - linux_amd64
+      - darwin_amd64
+      - darwin_arm64
+      - windows_amd64
+    env:
+      - CGO_ENABLED=0
+    ldflags:
+      - -s -w -X 'github.com/shundezhang/kubedmp/cmd/build.Version={{.Version}}' -X 'github.com/shundezhang/kubedmp/cmd/build.User={{ .Env.USER }}' -X 'github.com/shundezhang/kubedmp/cmd/build.Time={{.Now}}'
+
+archives:
+    # default format for Mac (darwin) and Linux
+    - format: tar.gz
+      # if the OS is windows, we override and put everything in a .zip instead.
+      format_overrides:
+          - goos: windows
+            format: zip
+      # Just the naming convention for tarballs... Example: msconsole_1.0.0_darwin_64bit
+      name_template: '{{.ProjectName}}_{{.Version}}_{{.Os}}-{{.Arch}}'
+      # Replace the cryptic arch's with readable human naming conventions
+      files:
+          - README.md
+          - LICENSE
+
+checksum:
+  name_template: 'checksums.txt'
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+    - '^docs:'
+    - '^test:'
+
+release:
+  prerelease: auto
+
+brews:
+- name: kubedmp
+  homepage: https://github.com/shundezhang/homebrew-kubedmp 
+  tap:
+    owner: shundezhang
+    name: homebrew-kubedmp
