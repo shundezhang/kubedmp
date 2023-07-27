@@ -15,9 +15,16 @@ const (
 )
 
 var logsCmd = &cobra.Command{
-	Use:   "logs",
-	Short: "show logs of a pod",
-	Long:  `show logs of a pod`,
+	Use:                   "logs POD_NAME [-n NAMESPACE] [-c CONTAINER_NAME]",
+	DisableFlagsInUseLine: true,
+	Short:                 "Print the logs for a container in a pod",
+	Long: `Print the logs for a container in a pod or specified resource.
+If the pod has more than one container, and a container name is not specified, logs of all containers will be printed out.`,
+	Example: `  # Return logs from pod nginx with all containers
+  kubedmp logs nginx
+  
+  # Return logs of ruby container logs from pod web-1
+  kubectl logs web-1 -c ruby`,
 	Run: func(cmd *cobra.Command, args []string) {
 		dumpFile, err := cmd.Flags().GetString(dumpFile)
 		if err != nil {
@@ -69,7 +76,7 @@ var logsCmd = &cobra.Command{
 
 func init() {
 	rootCmd.AddCommand(logsCmd)
-	logsCmd.Flags().StringP(ns, "n", "default", "namespace")
+	logsCmd.Flags().StringP(ns, "n", "default", "namespace of the pod")
 	logsCmd.Flags().StringP(cont, "c", "", "container")
 }
 

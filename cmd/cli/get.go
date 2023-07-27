@@ -9,9 +9,17 @@ import (
 )
 
 var getCmd = &cobra.Command{
-	Use:   "get",
-	Short: "get a resource or resources",
-	Long:  `get a resource or resources`,
+	Use:                   "get TYPE [-n NAMESPACE | -A]",
+	DisableFlagsInUseLine: true,
+	Short:                 "Display one or many resources",
+	Long: `Display one or many resources of a type, which can be node/no, pod/po, service/svc, deployment/deploy, daemonset/ds, replicaset/rs or event. 
+Prints a table of the most important information about resources of the specific type.`,
+	Example: `  # Lists all pods in kube-system namespace in ps output format, the output contains all fields in 'kubectl get -o wide'
+  kubedmp get po -n kube-system
+  
+  # List all nodes
+  kubedmp get no`,
+	// Args: cobra.MinimumNArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
 		dumpFile, err := cmd.Flags().GetString(dumpFile)
 		if err != nil {
@@ -29,7 +37,7 @@ var getCmd = &cobra.Command{
 			return
 		}
 		if len(args) == 0 {
-			fmt.Printf("Please specify a type, e.g. node/no, pod, svc/service, deploy/deployment, daemonset, event\n")
+			log.Fatalf("Please specify a type, e.g. node/no, pod/po, service/svc, deployment/deploy, daemonset/ds, replicaset/rs, event\n")
 			return
 		}
 		queryType := args[0]
@@ -38,7 +46,7 @@ var getCmd = &cobra.Command{
 			objectName = args[1]
 		}
 		if !contains([]string{"no", "node", "po", "pod", "svc", "service", "deploy", "deployment", "ds", "daemonset", "rs", "replicaset", "event"}, queryType) {
-			fmt.Printf("%s is not a supported resource.\n", queryType)
+			log.Fatalf("%s is not a supported resource.\n", queryType)
 			return
 		}
 		// fmt.Printf("In get: parsing dump file %s\n", dumpFile)
@@ -100,7 +108,7 @@ var getCmd = &cobra.Command{
 
 func init() {
 	rootCmd.AddCommand(getCmd)
-	getCmd.Flags().StringP(ns, "n", "default", "namespace")
+	getCmd.Flags().StringP(ns, "n", "default", "namespace of the resources, not applicable to node")
 	getCmd.Flags().BoolP(an, "A", false, "If present, list the requested object(s) across all namespaces.")
 }
 

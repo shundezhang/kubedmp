@@ -30,8 +30,9 @@ builds:
       - windows_amd64
     env:
       - CGO_ENABLED=0
+      - BUILD_USER={{ if index .Env "GITHUB_ACTOR" }}{{ .Env.GITHUB_ACTOR }}{{ else }}{{ .Env.USER }}{{ end }}
     ldflags:
-      - -s -w -X 'github.com/shundezhang/kubedmp/cmd/build.Version={{.Version}}' -X 'github.com/shundezhang/kubedmp/cmd/build.User={{ .Env.USER }}' -X 'github.com/shundezhang/kubedmp/cmd/build.Time={{.Now}}'
+      - -s -w -X 'github.com/shundezhang/kubedmp/cmd/build.Version={{.Version}}' -X 'github.com/shundezhang/kubedmp/cmd/build.User={{ .Env.BUILD_USER }}' -X 'github.com/shundezhang/kubedmp/cmd/build.Time={{.Now}}'
 
 archives:
     # default format for Mac (darwin) and Linux
@@ -68,3 +69,15 @@ brews:
   tap:
     owner: shundezhang
     name: homebrew-kubedmp
+
+snapcrafts:
+- summary: Display kubectl cluster-info dump output nicely
+  # publish: true # <- this line
+  description: |
+        Display kubectl cluster-info dump output nicely
+  grade: stable
+  confinement: devmode
+  apps:
+    kubedmp:
+      plugs: ["home"]
+      command: kubedmp

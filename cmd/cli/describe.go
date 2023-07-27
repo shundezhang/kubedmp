@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/url"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 	"text/tabwriter"
@@ -17,9 +18,17 @@ import (
 )
 
 var describeCmd = &cobra.Command{
-	Use:   "describe",
-	Short: "describe a resource",
-	Long:  `describe a resource`,
+	Use:                   "describe TYPE RESOURCE_NAME [-n NAMESPACE]",
+	DisableFlagsInUseLine: true,
+	Short:                 "Show details of a specific resource",
+	Long: `Show details of a specific resource. Print a detailed description of the selected resource.
+It can only show detais of one resource, whose type is either node/no, pod/po, service/svc, deployment/deploy, daemonset/ds or replicaset/rs.`,
+	Example: `  # Describe a node
+  $ kubedmp describe no juju-ceba75-k8s-2
+  
+  # Describe a pod in kube-system namespace
+  $ kubedmp describe po coredns-6bcf44f4cc-j9wkq -n kube-system`,
+	// Args:    cobra.MinimumNArgs(2),
 	Run: func(cmd *cobra.Command, args []string) {
 		dumpFile, err := cmd.Flags().GetString(dumpFile)
 		if err != nil {
@@ -32,14 +41,14 @@ var describeCmd = &cobra.Command{
 			return
 		}
 		if len(args) < 2 {
-			fmt.Printf("Please specify a type, e.g. node/no, pod, svc/service, deploy/deployment, daemonset, rs/replicaset, and an object name\n")
+			log.Fatalf("Please specify a type, e.g. node/no, pod/po, service/svc, deployment/deploy, daemonset/ds, replicaset/rs, and an object name\n")
 			return
 		}
 		queryType := args[0]
 		objectName := args[1]
 
 		if !contains([]string{"no", "node", "po", "pod", "svc", "service", "deploy", "deployment", "ds", "daemonset", "rs", "replicaset"}, queryType) {
-			fmt.Printf("%s is not a supported resource.\n", queryType)
+			log.Fatalf("%s is not a supported resource.\n", queryType)
 			return
 		}
 		f, err := os.Open(dumpFile)
@@ -73,7 +82,7 @@ var describeCmd = &cobra.Command{
 
 func init() {
 	rootCmd.AddCommand(describeCmd)
-	describeCmd.Flags().StringP(ns, "n", "default", "namespace")
+	describeCmd.Flags().StringP(ns, "n", "default", "namespace of the resource, not applicable to node")
 
 }
 
@@ -272,7 +281,7 @@ func describePod(item interface{}) {
 	fmt.Fprintf(writer, "Service Account:\t%s\n", spec["serviceAccount"])
 
 	if nodeName, ok := spec["nodeName"]; ok {
-		fmt.Fprintf(writer, "Node:\t%s\n", nodeName)
+		fmt.Fprintf(writer, "Node:\t%s\n", nodeName.(string)+"/"+status["hostIP"].(string))
 	}
 
 	creationTime, err := time.Parse("2006-01-02T15:04:05Z", creationTimeStr)
@@ -296,68 +305,34 @@ func describePod(item interface{}) {
 			fmt.Fprintf(writer, "  IP:\t%s\n", ip["ip"])
 		}
 	}
-	fmt.Fprintf(writer, "Containers:\n")
-	containerStatuses, ok := status["containerStatuses"].([]interface{})
-	for _, item1 := range spec["containers"].([]interface{}) {
-		cont := item1.(map[string]interface{})
-		describeContainerBasicInfoWithIndent(writer, cont, "  ")
-		if _, ok1 := cont["command"]; ok1 {
-			fmt.Fprintf(writer, "    Command:\n")
-			for _, item2 := range cont["command"].([]interface{}) {
-				fmt.Fprintf(writer, "      %s\n", item2)
+
+	if controllee, ok := metadata["ownerReferences"].([]interface{}); ok {
+		for _, item := range controllee {
+			controller := item.(map[string]interface{})
+			if isController, ok1 := controller["controller"].(bool); ok1 && isController {
+				fmt.Fprintf(writer, "Controlled By:\t%s/%s\n", controller["kind"], controller["name"])
+				break
 			}
 		}
+
+	}
+	fmt.Fprintf(writer, "Containers:\n")
+
+	statuses := make(map[string]interface{})
+	if containerStatuses, ok := status["containerStatuses"].([]interface{}); ok {
+		for _, item3 := range containerStatuses {
+			cStatus := item3.(map[string]interface{})
+			statuses[cStatus["name"].(string)] = cStatus
+		}
+	}
+	for _, item1 := range spec["containers"].([]interface{}) {
+		cont := item1.(map[string]interface{})
+		status, ok := statuses[cont["name"].(string)].(map[string]interface{})
+		describeContainerBasicInfoWithIndent(writer, cont, status, ok, "  ")
+		describeContainerCommandWithIndent(writer, cont, "  ")
+
 		if ok {
-			for _, item3 := range containerStatuses {
-				// fmt.Fprintf(writer, "item3: %s\n", item3)
-				cStatus := item3.(map[string]interface{})
-				if cStatus["name"] == cont["name"] {
-					cState := cStatus["state"].(map[string]interface{})
-					// fmt.Fprintf(writer, "cState: %s\n", cState)
-					if cRunning, ok2 := cState["running"]; ok2 {
-						cRunningMap := cRunning.(map[string]interface{})
-						fmt.Fprintf(writer, "    State:\tRunning\n")
-						startedTimeStr := cRunningMap["startedAt"].(string)
-						startedTime, err := time.Parse("2006-01-02T15:04:05Z", startedTimeStr)
-						if err == nil {
-							fmt.Fprintf(writer, "      Started:\t%s\n", startedTime.Format(time.RFC1123Z))
-						}
-					} else if cWaiting, ok2 := cState["waiting"]; ok2 {
-						cWaitingMap := cWaiting.(map[string]interface{})
-						fmt.Fprintf(writer, "    State:\tWaiting\n")
-						if reasonStr, ok3 := cWaitingMap["reason"]; ok3 {
-							fmt.Fprintf(writer, "      Reason:\t%s\n", reasonStr)
-						}
-					} else if cTerminated, ok2 := cState["terminated"]; ok2 {
-						cTerminatedMap := cTerminated.(map[string]interface{})
-						fmt.Fprintf(writer, "    State:\tTerminated\n")
-						if reasonStr, ok3 := cTerminatedMap["reason"]; ok3 {
-							fmt.Fprintf(writer, "      Reason:\t%s\n", reasonStr)
-						}
-						if messageStr, ok3 := cTerminatedMap["message"]; ok3 {
-							fmt.Fprintf(writer, "      Message:\t%s\n", messageStr)
-						}
-						fmt.Fprintf(writer, "      Exit Code:\t%s\n", cTerminatedMap["exitCode"])
-						if signalStr, ok3 := cTerminatedMap["signal"]; ok3 {
-							fmt.Fprintf(writer, "      Signal:\t%s\n", signalStr)
-						}
-						startedTimeStr := cTerminatedMap["startedAt"].(string)
-						startedTime, err := time.Parse("2006-01-02T15:04:05Z", startedTimeStr)
-						if err == nil {
-							fmt.Fprintf(writer, "      Started:\t%s\n", startedTime.Format(time.RFC1123Z))
-						}
-						finishedTimeStr := cTerminatedMap["startedAt"].(string)
-						finishedTime, err := time.Parse("2006-01-02T15:04:05Z", finishedTimeStr)
-						if err == nil {
-							fmt.Fprintf(writer, "      Finished:\t%s\n", finishedTime.Format(time.RFC1123Z))
-						}
-					} else {
-						fmt.Fprintf(writer, "    State:\tWaiting\n")
-					}
-				}
-				fmt.Fprintf(writer, "    Ready:\t%v\n", cStatus["ready"])
-				fmt.Fprintf(writer, "    Restart Count:\t%v\n", cStatus["restartCount"])
-			}
+			describeContainerStatusWithIndent(writer, status, "  ")
 		}
 		describeContainerResourcesWithIndent(writer, cont, "  ")
 		describeContainerProbeWithIndent(writer, cont, "  ")
@@ -407,14 +382,22 @@ func describePod(item interface{}) {
 			idx++
 
 		}
+	} else {
+		fmt.Fprintf(writer, "Node-Selectors:\t<none>\n")
 	}
 	if tolerations, ok1 := spec["tolerations"].([]interface{}); ok1 {
 		for idx, item1 := range tolerations {
 			tlr := item1.(map[string]interface{})
 			if idx == 0 {
-				fmt.Fprintf(writer, "Tolerations:\t%s:%s", tlr["key"], tlr["effect"])
+				fmt.Fprintf(writer, "Tolerations:\t%s", tlr["key"])
 			} else {
-				fmt.Fprintf(writer, "  \t%s:%s", tlr["key"], tlr["effect"])
+				fmt.Fprintf(writer, "  \t%s", tlr["key"])
+			}
+			if value, ok2 := tlr["value"]; ok2 {
+				fmt.Fprintf(writer, "=%v", value)
+			}
+			if effect, ok2 := tlr["effect"]; ok2 {
+				fmt.Fprintf(writer, ":%v", effect)
 			}
 			if op, ok2 := tlr["operator"]; ok2 {
 				fmt.Fprintf(writer, " op=%s", op)
@@ -600,7 +583,7 @@ func describeDaemonSet(item interface{}) {
 	// fmt.Fprintf(writer, "Pods Status:\t%d Running / %d Waiting / %d Succeeded / %d Failed\n", running, waiting, succeeded, failed)
 	// pod template
 	describePodTemplate(writer, template)
-	describeVolumesWithIndent(writer, templateSpec["volumes"], "  ")
+	// describeVolumesWithIndent(writer, templateSpec["volumes"], "  ")
 	writer.Flush()
 }
 
@@ -610,7 +593,7 @@ func describeReplicaSet(item interface{}) {
 	status := rs["status"].(map[string]interface{})
 	spec := rs["spec"].(map[string]interface{})
 	template := spec["template"].(map[string]interface{})
-	templateSpec := template["spec"].(map[string]interface{})
+	// templateSpec := template["spec"].(map[string]interface{})
 	writer := tabwriter.NewWriter(os.Stdout, 0, 8, 1, '\t', tabwriter.AlignRight)
 	fmt.Fprintf(writer, "Name:\t%s\n", metadata["name"])
 	fmt.Fprintf(writer, "Namespace:\t%s\n", metadata["namespace"])
@@ -633,7 +616,7 @@ func describeReplicaSet(item interface{}) {
 	// 	w.Write(LEVEL_0, "%d Running / %d Waiting / %d Succeeded / %d Failed\n", running, waiting, succeeded, failed)
 	// }
 	describePodTemplate(writer, template)
-	describeVolumesWithIndent(writer, templateSpec["volumes"], "  ")
+
 	describeConditions(writer, status["conditions"])
 	writer.Flush()
 }
@@ -691,9 +674,15 @@ func describeAnnotationsWithIndent(writer *tabwriter.Writer, annotations interfa
 	}
 }
 
-func describeContainerBasicInfoWithIndent(writer *tabwriter.Writer, cont map[string]interface{}, indent string) {
+func describeContainerBasicInfoWithIndent(writer *tabwriter.Writer, cont map[string]interface{}, status map[string]interface{}, ok bool, indent string) {
 	fmt.Fprintf(writer, "%s%s:\n", indent, cont["name"])
+	if ok {
+		fmt.Fprintf(writer, "  %sContainer ID:\t%s\n", indent, status["containerID"])
+	}
 	fmt.Fprintf(writer, "  %sImage:\t%s\n", indent, cont["image"])
+	if ok {
+		fmt.Fprintf(writer, "  %sImage ID:\t%s\n", indent, status["imageID"])
+	}
 	portList := []string{}
 	hostPortList := []string{}
 	if ports, ok := cont["ports"].([]interface{}); ok {
@@ -713,6 +702,12 @@ func describeContainerBasicInfoWithIndent(writer *tabwriter.Writer, cont map[str
 		fmt.Fprintf(writer, "  %sPort:\t%s\n", indent, strings.Join(portList, ", "))
 		fmt.Fprintf(writer, "  %sHost Port:\t%s\n", indent, strings.Join(hostPortList, ", "))
 	}
+	if len(portList) == 0 {
+		fmt.Fprintf(writer, "  %sPort:\t<none>\n", indent)
+	}
+	if len(hostPortList) == 0 {
+		fmt.Fprintf(writer, "  %sHost Port:\t<none>\n", indent)
+	}
 }
 
 func describeContainerCommandWithIndent(writer *tabwriter.Writer, cont map[string]interface{}, indent string) {
@@ -727,6 +722,63 @@ func describeContainerCommandWithIndent(writer *tabwriter.Writer, cont map[strin
 		for _, item2 := range args {
 			fmt.Fprintf(writer, "    %s%s\n", indent, item2)
 		}
+	}
+}
+
+func describeContainerStatusWithIndent(writer *tabwriter.Writer, status map[string]interface{}, indent string) {
+
+	if state, ok1 := status["state"].(map[string]interface{}); ok1 {
+		describeContainerStateWithIndent(writer, state, "State", indent)
+	}
+	if lastState, ok1 := status["lastState"].(map[string]interface{}); ok1 {
+		if _, ok2 := lastState["terminated"]; ok2 {
+			describeContainerStateWithIndent(writer, lastState, "Last State", indent)
+		}
+	}
+	fmt.Fprintf(writer, "  %sReady:\t%v\n", indent, status["ready"])
+	fmt.Fprintf(writer, "  %sRestart Count:\t%v\n", indent, status["restartCount"])
+}
+
+func describeContainerStateWithIndent(writer *tabwriter.Writer, state map[string]interface{}, stateName string, indent string) {
+	if cRunning, ok2 := state["running"]; ok2 {
+		cRunningMap := cRunning.(map[string]interface{})
+		fmt.Fprintf(writer, "  %s%s:\tRunning\n", indent, stateName)
+		startedTimeStr := cRunningMap["startedAt"].(string)
+		startedTime, err := time.Parse("2006-01-02T15:04:05Z", startedTimeStr)
+		if err == nil {
+			fmt.Fprintf(writer, "    %sStarted:\t%s\n", indent, startedTime.Format(time.RFC1123Z))
+		}
+	} else if cWaiting, ok2 := state["waiting"]; ok2 {
+		cWaitingMap := cWaiting.(map[string]interface{})
+		fmt.Fprintf(writer, "  %s%s:\tWaiting\n", indent, stateName)
+		if reasonStr, ok3 := cWaitingMap["reason"]; ok3 {
+			fmt.Fprintf(writer, "    %sReason:\t%s\n", indent, reasonStr)
+		}
+	} else if cTerminated, ok2 := state["terminated"]; ok2 {
+		cTerminatedMap := cTerminated.(map[string]interface{})
+		fmt.Fprintf(writer, "  %s%s:\tTerminated\n", indent, stateName)
+		if reasonStr, ok3 := cTerminatedMap["reason"]; ok3 {
+			fmt.Fprintf(writer, "    %sReason:\t%s\n", indent, reasonStr)
+		}
+		if messageStr, ok3 := cTerminatedMap["message"]; ok3 {
+			fmt.Fprintf(writer, "    %sMessage:\t%s\n", indent, messageStr)
+		}
+		fmt.Fprintf(writer, "    %sExit Code:\t%v\n", indent, cTerminatedMap["exitCode"])
+		if signalStr, ok3 := cTerminatedMap["signal"]; ok3 {
+			fmt.Fprintf(writer, "    %sSignal:\t%s\n", indent, signalStr)
+		}
+		startedTimeStr := cTerminatedMap["startedAt"].(string)
+		startedTime, err := time.Parse("2006-01-02T15:04:05Z", startedTimeStr)
+		if err == nil {
+			fmt.Fprintf(writer, "    %sStarted:\t%s\n", indent, startedTime.Format(time.RFC1123Z))
+		}
+		finishedTimeStr := cTerminatedMap["startedAt"].(string)
+		finishedTime, err := time.Parse("2006-01-02T15:04:05Z", finishedTimeStr)
+		if err == nil {
+			fmt.Fprintf(writer, "    %sFinished:\t%s\n", indent, finishedTime.Format(time.RFC1123Z))
+		}
+	} else {
+		fmt.Fprintf(writer, "  %s%s:\tWaiting\n", indent, stateName)
 	}
 }
 
@@ -759,7 +811,27 @@ func describeContainerProbeWithIndent(writer *tabwriter.Writer, cont map[string]
 }
 
 func describeProbe(probe map[string]interface{}) string {
-	attrs := fmt.Sprintf("delay=%vs timeout=%vs period=%vs #success=%v #failure=%v", probe["initialDelaySeconds"], probe["timeoutSeconds"], probe["periodSeconds"], probe["successThreshold"], probe["failureThreshold"])
+	initialDelaySeconds := 0
+	if _, ok1 := probe["initialDelaySeconds"]; ok1 {
+		initialDelaySeconds = int(probe["initialDelaySeconds"].(float64))
+	}
+	timeoutSeconds := 0
+	if _, ok1 := probe["timeoutSeconds"]; ok1 {
+		timeoutSeconds = int(probe["timeoutSeconds"].(float64))
+	}
+	periodSeconds := 0
+	if _, ok1 := probe["periodSeconds"]; ok1 {
+		periodSeconds = int(probe["periodSeconds"].(float64))
+	}
+	successThreshold := 0
+	if _, ok1 := probe["successThreshold"]; ok1 {
+		successThreshold = int(probe["successThreshold"].(float64))
+	}
+	failureThreshold := 0
+	if _, ok1 := probe["failureThreshold"]; ok1 {
+		failureThreshold = int(probe["failureThreshold"].(float64))
+	}
+	attrs := fmt.Sprintf("delay=%vs timeout=%vs period=%vs #success=%v #failure=%v", initialDelaySeconds, timeoutSeconds, periodSeconds, successThreshold, failureThreshold)
 	if _, ok5 := probe["exec"]; ok5 {
 		probe := probe["exec"].(map[string]interface{})
 		return fmt.Sprintf("exec %v %s\n", probe["command"], attrs)
@@ -772,7 +844,7 @@ func describeProbe(probe map[string]interface{}) string {
 			host = probe["host"].(string)
 		}
 		if _, ok6 := probe["port"]; ok6 {
-			url.Host = net.JoinHostPort(host, strconv.FormatInt(int64((probe["port"].(float64))), 10))
+			url.Host = net.JoinHostPort(host, strconv.FormatInt(int64(probe["port"].(float64)), 10))
 		} else {
 			url.Host = host
 		}
@@ -889,7 +961,7 @@ func describeVolumesWithIndent(writer *tabwriter.Writer, items interface{}, inde
 		fmt.Fprintf(writer, "%sVolumes:\n", indent)
 		for _, item1 := range volumes {
 			vol := item1.(map[string]interface{})
-			fmt.Fprintf(writer, "  %s%v:\n", vol["name"], indent)
+			fmt.Fprintf(writer, "  %s%v:\n", indent, vol["name"])
 			if hostPath, ok2 := vol["hostPath"].(map[string]interface{}); ok2 {
 				fmt.Fprintf(writer, "    %sType:\tHostPath (bare host directory volume)\n", indent)
 				fmt.Fprintf(writer, "    %sPath:\t%s\n", indent, hostPath["path"])
@@ -928,7 +1000,11 @@ func describeVolumesWithIndent(writer *tabwriter.Writer, items interface{}, inde
 				fmt.Fprintf(writer, "    %sType:\tNFS (an NFS mount that lasts the lifetime of a pod)\n", indent)
 				fmt.Fprintf(writer, "    %sServer:\t%v\n", indent, nfs["server"])
 				fmt.Fprintf(writer, "    %sPath:\t%v\n", indent, nfs["path"])
-				fmt.Fprintf(writer, "    %sReadOnly:\t%v\n", indent, nfs["readOnly"])
+				readOnly := false
+				if _, ok3 := nfs["readOnly"]; ok3 {
+					readOnly = nfs["readOnly"].(bool)
+				}
+				fmt.Fprintf(writer, "    %sReadOnly:\t%v\n", indent, readOnly)
 			} else if iscsi, ok2 := vol["iscsi"].(map[string]interface{}); ok2 {
 				fmt.Fprintf(writer, "    %sType:\tISCSI (an ISCSI Disk resource that is attached to a kubelet's host machine and then exposed to the pod)\n", indent)
 				fmt.Fprintf(writer, "    %sTargetPortal:\t%v\n", indent, iscsi["portals"])
@@ -1047,14 +1123,15 @@ func describePodTemplate(writer *tabwriter.Writer, template map[string]interface
 	for _, cont := range templateSpec["containers"].([]interface{}) {
 		describeContainer(writer, cont.(map[string]interface{}), "    ")
 	}
-	// describeTopologySpreadConstraints(template.Spec.TopologySpreadConstraints, w, "  ")
+	describeVolumesWithIndent(writer, templateSpec["volumes"], "  ")
+	describeTopologySpreadConstraints(writer, templateSpec["topologySpreadConstraints"], "  ")
 	if priorityClassName, ok := templateSpec["priorityClassName"]; ok {
 		fmt.Fprintf(writer, "  Priority Class Name:\t%s\n", priorityClassName)
 	}
 }
 
 func describeContainer(writer *tabwriter.Writer, cont map[string]interface{}, indent string) {
-	describeContainerBasicInfoWithIndent(writer, cont, indent)
+	describeContainerBasicInfoWithIndent(writer, cont, nil, false, indent)
 	describeContainerCommandWithIndent(writer, cont, indent)
 	describeContainerResourcesWithIndent(writer, cont, indent)
 	describeContainerProbeWithIndent(writer, cont, indent)
@@ -1070,6 +1147,43 @@ func describeConditions(writer *tabwriter.Writer, items interface{}) {
 		for _, cond := range conditions {
 			condMap := cond.(map[string]interface{})
 			fmt.Fprintf(writer, "  %v \t%v\t%v\n", condMap["type"], condMap["status"], condMap["reason"])
+		}
+	}
+}
+
+func describeTopologySpreadConstraints(writer *tabwriter.Writer, items interface{}, indent string) {
+	if tscs, ok := items.([]interface{}); ok {
+		sort.Slice(tscs, func(i, j int) bool {
+			tscs1 := tscs[i].(map[string]interface{})
+			tscs2 := tscs[j].(map[string]interface{})
+			key1, _ := strconv.ParseInt(tscs1["topologyKey"].(string), 10, 0)
+			key2, _ := strconv.ParseInt(tscs2["topologyKey"].(string), 10, 0)
+			return key1 < key2
+		})
+		fmt.Fprintf(writer, "%sTopology Spread Constraints:\t", indent)
+		for i, item := range tscs {
+			if i != 0 {
+				fmt.Fprintf(writer, "%s", indent)
+				fmt.Fprintf(writer, "%s", "\t")
+			}
+			tsc := item.(map[string]interface{})
+			fmt.Fprintf(writer, "%s:", tsc["topologyKey"])
+			fmt.Fprintf(writer, "%v", tsc["whenUnsatisfiable"])
+			fmt.Fprintf(writer, " when max skew %v is exceeded", tsc["maxSkew"])
+			if labelSelector, ok1 := tsc["labelSelector"].(map[string]interface{}); ok1 {
+				if selectorMap, ok2 := labelSelector["matchLabels"].(map[string]interface{}); ok2 {
+					idx := 0
+					for k, v := range selectorMap {
+						if idx == 0 {
+							fmt.Fprintf(writer, " for selector %s=%s", k, v)
+						} else {
+							fmt.Fprintf(writer, ",%s=%s", k, v)
+						}
+						idx++
+					}
+				}
+			}
+			fmt.Fprintf(writer, "\n")
 		}
 	}
 }
