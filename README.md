@@ -1,7 +1,7 @@
 # kubedmp
 ## Intruction
 The `kubectl cluster-info dump` command dumps cluster information for debugging and diagnosing cluster problems.
-The output consists of a number of json documents and container logs. It can be very large if all of these are dumped to a single file.
+The output consists of a number of json documents and container logs. It can be very large if all of these are dumped into a single file.
 kubedmp parses the dump file and displays it nicely in a simliar way as kubectl command's output.
 
 ## Usage

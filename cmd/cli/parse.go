@@ -1,10 +1,11 @@
 package cli
 
 import (
-	"bufio"
+	// "bufio"
 	"fmt"
-	"log"
+	// "log"
 	"os"
+	// "path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -252,62 +253,6 @@ func prettyPrintEventList(items []interface{}) {
 		// fmt.Println("item: ", reflect.TypeOf(node["status"]).String())
 	}
 	writer.Flush()
-}
-
-func show(dumpFilename string, pi PickItem, queryType, namespace, objectName string) {
-	var buffer string
-	var inject bool
-
-	// fmt.Printf("In parse.show: parsing dump file %s\n", dumpFilename)
-	//scanner := bufio.NewScanner(os.Stdin)
-	// r := bufio.NewReaderSize(os.Stdin, 500*1024)
-
-	f, err := os.Open(dumpFilename)
-	if err != nil {
-		log.Fatalf("Error to read [file=%v]: %v", dumpFilename, err.Error())
-	}
-
-	scanner := bufio.NewScanner(f)
-	items := []interface{}{}
-	for scanner.Scan() {
-		line := scanner.Text()
-		if line == "{" {
-			buffer = line
-			inject = true
-		} else if line == "}" {
-			buffer += line
-			inject = false
-			for _, item := range pi(buffer, queryType, namespace, objectName) {
-				items = append(items, item)
-			}
-			buffer = ""
-		} else if inject {
-			buffer += line
-		}
-	}
-
-	f.Close()
-	// fmt.Println(items)
-	switch queryType {
-	case "no", "node":
-		prettyPrintNodeList(items)
-	case "po", "pod":
-		prettyPrintPodList(items)
-	case "svc", "service":
-		prettyPrintServiceList(items)
-	case "deploy", "deployment":
-		prettyPrintDeploymentList(items)
-	case "ds", "daemonset":
-		prettyPrintDaemonSetList(items)
-	case "rs", "replicaset":
-		prettyPrintReplicaSetList(items)
-	case "event":
-		prettyPrintEventList(items)
-	}
-
-	// if err := scanner.Err(); err != nil {
-	// 	log.Println(err)
-	// }
 }
 
 func getAge(creationTimeStr string) string {

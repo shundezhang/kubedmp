@@ -71,12 +71,12 @@ brews:
     name: homebrew-kubedmp
 
 snapcrafts:
-- summary: Display kubectl cluster-info dump output nicely
-  # publish: true # <- this line
+- summary: Display output of 'kubectl cluster-info dump' nicely
+  publish: true
   description: |
-        Display kubectl cluster-info dump output nicely
+        Display output of 'kubectl cluster-info dump' nicely
   grade: stable
-  confinement: devmode
+  confinement: strict
   apps:
     kubedmp:
       plugs: ["home"]

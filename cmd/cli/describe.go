@@ -1,13 +1,13 @@
 package cli
 
 import (
-	"bufio"
 	"encoding/json"
 	"fmt"
 	"log"
 	"net"
 	"net/url"
 	"os"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -30,71 +30,91 @@ It can only show detais of one resource, whose type is either node/no, pod/po, s
   $ kubedmp describe po coredns-6bcf44f4cc-j9wkq -n kube-system`,
 	// Args:    cobra.MinimumNArgs(2),
 	Run: func(cmd *cobra.Command, args []string) {
-		dumpFile, err := cmd.Flags().GetString(dumpFile)
-		if err != nil {
-			log.Fatalf("Please provide a dump file\n")
-			return
-		}
-		namespace, err := cmd.Flags().GetString(ns)
-		if err != nil {
-			log.Fatalf("Error parsing namespace\n")
-			return
-		}
+		// dumpFile, err := cmd.Flags().GetString(dumpFileFlag)
+		// if err != nil {
+		// 	log.Fatalf("Please provide a dump file\n")
+		// 	return
+		// }
+		// namespace, err := cmd.Flags().GetString(ns)
+		// if err != nil {
+		// 	log.Fatalf("Error parsing namespace\n")
+		// 	return
+		// }
 		if len(args) < 2 {
 			log.Fatalf("Please specify a type, e.g. node/no, pod/po, service/svc, deployment/deploy, daemonset/ds, replicaset/rs, and an object name\n")
 			return
 		}
-		queryType := args[0]
-		objectName := args[1]
+		resType = args[0]
+		resName = args[1]
 
-		if !contains([]string{"no", "node", "po", "pod", "svc", "service", "deploy", "deployment", "ds", "daemonset", "rs", "replicaset"}, queryType) {
-			log.Fatalf("%s is not a supported resource.\n", queryType)
+		if !hasType(resType) {
 			return
 		}
-		f, err := os.Open(dumpFile)
-		if err != nil {
-			log.Fatalf("Error to read [file=%v]: %v", dumpFile, err.Error())
-		}
-		var buffer string
-		var inject bool
-
-		scanner := bufio.NewScanner(f)
-
-		for scanner.Scan() {
-			line := scanner.Text()
-			if line == "{" {
-				buffer = line
-				inject = true
-			} else if line == "}" {
-				buffer += line
-				inject = false
-				describeObject(buffer, queryType, namespace, objectName)
-				buffer = ""
-			} else if inject {
-				buffer += line
+		filePath := dumpFile
+		if len(dumpDir) > 0 {
+			filename := ""
+			switch resType {
+			case "no", "node":
+				filename = "nodes"
+			case "po", "pod":
+				filename = "pods"
+			case "svc", "service":
+				filename = "services"
+			case "deploy", "deployment":
+				filename = "deployments"
+			case "ds", "daemonset":
+				filename = "daemonsets"
+			case "rs", "replicaset":
+				filename = "replicasets"
+			case "event":
+				filename = "events"
 			}
+			filePath = filepath.Join(dumpDir, resNamespace, filename+"."+dumpFormat)
 		}
+		// f, err := os.Open(filePath)
+		// if err != nil {
+		// 	log.Fatalf("Error to read [file=%v]: %v", filePath, err.Error())
+		// }
+		// var buffer string
+		// var inject bool
 
-		f.Close()
+		// scanner := bufio.NewScanner(f)
+
+		// for scanner.Scan() {
+		// 	line := scanner.Text()
+		// 	if line == "{" {
+		// 		buffer = line
+		// 		inject = true
+		// 	} else if line == "}" {
+		// 		buffer += line
+		// 		inject = false
+		// 		describeObject(buffer, resType, namespace, resName)
+		// 		buffer = ""
+		// 	} else if inject {
+		// 		buffer += line
+		// 	}
+		// }
+
+		// f.Close()
+		readFile(filePath, describeObject)
 
 	},
 }
 
 func init() {
 	rootCmd.AddCommand(describeCmd)
-	describeCmd.Flags().StringP(ns, "n", "default", "namespace of the resource, not applicable to node")
+	describeCmd.Flags().StringVarP(&resNamespace, ns, "n", "default", "namespace of the resource, not applicable to node")
 
 }
 
-func describeObject(buffer, queryType, namespace, objectName string) {
+func describeObject(buffer string) {
 	var result map[string]interface{}
 	// fmt.Println(buffer)
+	fmt.Println(resType, resNamespace, resName)
 	err := json.Unmarshal([]byte(buffer), &result)
 
 	if err != nil {
-		fmt.Println(err.Error())
-		fmt.Println(buffer)
-		return
+		log.Fatalf("Error processing buffer: %v\n%v\n", err.Error(), buffer)
 	}
 
 	for _, item := range result["items"].([]interface{}) {
@@ -103,19 +123,19 @@ func describeObject(buffer, queryType, namespace, objectName string) {
 		// fmt.Println("item: ", reflect.TypeOf(node["status"]).String())
 		metadata := obj["metadata"].(map[string]interface{})
 		// fmt.Printf("object ns %s pod %s \n", metadata["namespace"], metadata["name"])
-		if (queryType == "no" || queryType == "node") && objectName == metadata["name"] && result["kind"] == "NodeList" {
+		if (resType == "no" || resType == "node") && resName == metadata["name"] && result["kind"] == "NodeList" {
 			describeNode(item)
-		} else if (queryType == "po" || queryType == "pod") && objectName == metadata["name"] && namespace == metadata["namespace"] && result["kind"] == "PodList" {
+		} else if (resType == "po" || resType == "pod") && resName == metadata["name"] && resNamespace == metadata["namespace"] && result["kind"] == "PodList" {
 			describePod(item)
-		} else if (queryType == "svc" || queryType == "service") && objectName == metadata["name"] && namespace == metadata["namespace"] && result["kind"] == "ServiceList" {
+		} else if (resType == "svc" || resType == "service") && resName == metadata["name"] && resNamespace == metadata["namespace"] && result["kind"] == "ServiceList" {
 			describeService(item)
-		} else if (queryType == "deploy" || queryType == "deployment") && objectName == metadata["name"] && namespace == metadata["namespace"] && result["kind"] == "DeploymentList" {
+		} else if (resType == "deploy" || resType == "deployment") && resName == metadata["name"] && resNamespace == metadata["namespace"] && result["kind"] == "DeploymentList" {
 			describeDeployment(item)
-		} else if (queryType == "ds" || queryType == "daemonset") && objectName == metadata["name"] && namespace == metadata["namespace"] && result["kind"] == "DaemonSetList" {
+		} else if (resType == "ds" || resType == "daemonset") && resName == metadata["name"] && resNamespace == metadata["namespace"] && result["kind"] == "DaemonSetList" {
 			describeDaemonSet(item)
-		} else if (queryType == "rs" || queryType == "replicaset") && objectName == metadata["name"] && namespace == metadata["namespace"] && result["kind"] == "ReplicaSetList" {
+		} else if (resType == "rs" || resType == "replicaset") && resName == metadata["name"] && resNamespace == metadata["namespace"] && result["kind"] == "ReplicaSetList" {
 			describeReplicaSet(item)
-			// } else if namespace == metadata["namespace"] && objectName == metadata["name"] {
+			// } else if namespace == metadata["namespace"] && resName == metadata["name"] {
 			// 	fmt.Println("item: ", item)
 		}
 

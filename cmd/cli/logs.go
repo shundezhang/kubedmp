@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -26,37 +27,39 @@ If the pod has more than one container, and a container name is not specified, l
   # Return logs of ruby container logs from pod web-1
   kubectl logs web-1 -c ruby`,
 	Run: func(cmd *cobra.Command, args []string) {
-		dumpFile, err := cmd.Flags().GetString(dumpFile)
-		if err != nil {
-			log.Fatalf("Please provide a dump file\n")
-			return
-		}
+		// dumpFile, err := cmd.Flags().GetString(dumpFileFlag)
+		// if err != nil {
+		// 	log.Fatalf("Please provide a dump file\n")
+		// 	return
+		// }
 
 		if len(args) == 0 {
-			log.Fatalf("Please provide a pod name\n")
+			log.Fatalf("Please provide a pod name.\n")
 			return
 		}
 		podName := args[0]
-		namespace, err := cmd.Flags().GetString(ns)
-		if err != nil {
-			log.Fatalf("Error parsing namespace\n")
-			return
+
+		// container, err := cmd.Flags().GetString(cont)
+		// if err != nil {
+		// 	log.Fatalf("Error parsing container\n")
+		// 	return
+		// }
+		// fmt.Printf("parsing dump file %s\n", dumpFile)
+		logFile := dumpFile
+
+		if len(dumpDir) > 0 {
+			logFile = filepath.Join(dumpDir, resNamespace, podName, "logs.txt")
 		}
-		container, err := cmd.Flags().GetString(cont)
+		f, err := os.Open(logFile)
 		if err != nil {
-			log.Fatalf("Error parsing container\n")
-			return
-		} // fmt.Printf("parsing dump file %s\n", dumpFile)
-		f, err := os.Open(dumpFile)
-		if err != nil {
-			log.Fatalf("Error to read [file=%v]: %v", dumpFile, err.Error())
+			log.Fatalf("Error to read [file=%v]: %v", logFile, err.Error())
 		}
 
 		finishedCh := make(chan bool, 1)
 		buff := make(chan string, 100)
-		marker := namespace + "/" + podName
-		if len(container) > 0 {
-			marker = "container " + container + " of pod " + namespace + "/" + podName
+		marker := resNamespace + "/" + podName
+		if len(resContainer) > 0 {
+			marker = "container " + resContainer + " of pod " + resNamespace + "/" + podName
 		}
 		go scanFile(f, marker, buff, finishedCh)
 		defer func() {
@@ -76,8 +79,8 @@ If the pod has more than one container, and a container name is not specified, l
 
 func init() {
 	rootCmd.AddCommand(logsCmd)
-	logsCmd.Flags().StringP(ns, "n", "default", "namespace of the pod")
-	logsCmd.Flags().StringP(cont, "c", "", "container")
+	logsCmd.Flags().StringVarP(&resNamespace, ns, "n", "default", "namespace of the pod")
+	logsCmd.Flags().StringVarP(&resContainer, cont, "c", "", "container")
 }
 
 func scanFile(f *os.File, marker string, buff chan string, finishedCh chan bool) {
