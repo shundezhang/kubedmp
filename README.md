@@ -104,5 +104,11 @@ make bin
 ```
 Or use goreleaser
 ```
-goreleaser --snapshot --skip-publish --rm-dist
+goreleaser --snapshot --skip-publish --clean
+```
+
+Release
+```
+git tag version-number
+git push --tags
 ```
