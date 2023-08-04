@@ -35,9 +35,10 @@ const (
 )
 
 var rootCmd = &cobra.Command{
-	Use:   "kubedmp",
-	Short: "Display k8s cluster-info dump in ps format",
-	Long:  "Display k8s cluster-info dump in ps format",
+	Use:                   "kubedmp [-f dump/file | -d dump/dir] command",
+	DisableFlagsInUseLine: true,
+	Short:                 "Display k8s cluster-info dump in ps format",
+	Long:                  "Display k8s cluster-info dump in ps format",
 	Run: func(cmd *cobra.Command, args []string) {
 		if getVersion {
 			fmt.Println("Version:\t", build.Version)
@@ -61,7 +62,7 @@ func init() {
 	cobra.OnInitialize(initConfig)
 	rootCmd.PersistentFlags().StringVarP(&dumpFile, dumpFileFlag, "f", "./cluster-info.dump", "Path to dump file")
 	rootCmd.Flags().BoolVarP(&getVersion, "version", "v", false, "get version")
-	rootCmd.PersistentFlags().StringVarP(&dumpDir, dumpDirFlag, "d", "", "Path to dump dir")
+	rootCmd.PersistentFlags().StringVarP(&dumpDir, dumpDirFlag, "d", "", "Path to dump directory")
 }
 
 func initConfig() {

@@ -118,8 +118,8 @@ func processDoc(buffer string) {
 		findItems(result["items"].([]interface{}))
 	} else if (resType == "rs" || resType == "replicaset") && result["kind"] == "ReplicaSetList" {
 		findItems(result["items"].([]interface{}))
-		// } else if namespace == metadata["namespace"] && resName == metadata["name"] {
-		// 	fmt.Println("item: ", item)
+	} else if resType == "event" && result["kind"] == "EventList" {
+		findItems(result["items"].([]interface{}))
 	}
 }
 

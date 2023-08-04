@@ -2,11 +2,11 @@
 ## Intruction
 The `kubectl cluster-info dump` command dumps cluster information for debugging and diagnosing cluster problems.
 The output consists of a number of json documents and container logs. It can be very large if all of these are dumped into a single file.
-kubedmp parses the dump file and displays it nicely in a simliar way as kubectl command's output.
+kubedmp parses the dump file(s) and displays the output nicely in a simliar way as kubectl command's output.
 
 ## Usage
 
-The use of kubedmp is similar to kubectl; it has several sub commands. By default it reads file `./cluster-info.dump` as input, or it can be specified with flag `-f path/to/dump/file`.
+The use of kubedmp is similar to kubectl; it has several sub commands. By default it reads file `./cluster-info.dump` as input; a different file can be specified with flag `-f path/to/dump/file`; if the dump is a directory, specify it with `-d path/to/dump/dir`.
 
 ```
 Available Commands:
@@ -16,6 +16,7 @@ Available Commands:
   show        show all objects in cluster info dump file in ps output format
 
 Flags:
+  -d, --dumpdir string    Path to dump dir
   -f, --dumpfile string   Path to dump file (default "./cluster-info.dump")
   -h, --help              help for kubedmp
   -v, --version           get version
@@ -83,6 +84,11 @@ Homebrew supports MacOS and Linux.
 ```
 brew tap shundezhang/kubedmp
 brew install shundezhang/kubedmp/kubedmp
+```
+### Snap
+Snap supports Linux.
+```
+snap install kubedmp
 ```
 
 ## Development
