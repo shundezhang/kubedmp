@@ -228,14 +228,16 @@ func prettyPrintDaemonSetList(items []interface{}) {
 				nodeSelectorList = append(nodeSelectorList, k+"="+v.(string))
 			}
 		}
-		fmt.Fprintf(writer, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", metadata["name"], metadata["namespace"], desire, current, ready, update, avail, strings.Join(nodeSelectorList, ","), age)
+		fmt.Fprintf(writer, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", metadata["namespace"], metadata["name"], desire, current, ready, update, avail, strings.Join(nodeSelectorList, ","), age)
 	}
 	writer.Flush()
 }
 
 func prettyPrintEventList(items []interface{}) {
 	sort.Slice(items, func(i, j int) bool {
-		return items[i].(map[string]interface{})["lastTimestamp"].(string) > items[j].(map[string]interface{})["lastTimestamp"].(string)
+		// fmt.Println("items[i].(map[string]interface{}): ", items[i].(map[string]interface{}))
+		// fmt.Println("items[j].(map[string]interface{}): ", items[j].(map[string]interface{}))
+		return getEventTime(items[i].(map[string]interface{})) > getEventTime(items[j].(map[string]interface{}))
 	})
 	writer := tabwriter.NewWriter(os.Stdout, 0, 8, 1, '\t', tabwriter.AlignRight)
 	fmt.Fprintln(writer, "NAMESPACE\tLAST SEEN\tTYPE\tREASON\tOBJECT\tMESSAGE")
@@ -244,15 +246,31 @@ func prettyPrintEventList(items []interface{}) {
 		metadata := event["metadata"].(map[string]interface{})
 		involvedObject := event["involvedObject"].(map[string]interface{})
 		// source := event["source"].(map[string]interface{})
-		lastTimestampStr := event["lastTimestamp"].(string)
+
 		// fmt.Println("lastTimestampStr: ", lastTimestampStr)
-		age := getAge(lastTimestampStr)
-		fmt.Fprintf(writer, "%s\t%s\t%s\t%s\t%s\t%s\n", metadata["namespace"], age, event["type"], event["reason"], strings.ToLower(involvedObject["kind"].(string))+"/"+involvedObject["name"].(string), event["message"])
+
+		age := getAge(getEventTime(event))
+
+		message := ""
+		if event["message"] != nil {
+			message = strings.TrimSpace(event["message"].(string))
+		}
+		fmt.Fprintf(writer, "%s\t%s\t%s\t%s\t%s/%s\t%s\n", metadata["namespace"], age, event["type"], event["reason"], strings.ToLower(involvedObject["kind"].(string)), involvedObject["name"].(string), message)
 
 		// fmt.Println("item: ", reflect.TypeOf(item).String())
 		// fmt.Println("item: ", reflect.TypeOf(node["status"]).String())
 	}
 	writer.Flush()
+}
+
+func getEventTime(event map[string]interface{}) string {
+	if series, ok := event["series"].(map[string]interface{}); ok {
+		return series["lastObservedTime"].(string)
+	}
+	if lastTimestamp, ok := event["lastTimestamp"].(string); ok {
+		return lastTimestamp
+	}
+	return event["eventTime"].(string)
 }
 
 func getAge(creationTimeStr string) string {

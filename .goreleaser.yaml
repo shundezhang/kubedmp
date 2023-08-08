@@ -66,7 +66,7 @@ release:
 brews:
 - name: kubedmp
   homepage: https://github.com/shundezhang/homebrew-kubedmp 
-  tap:
+  repository:
     owner: shundezhang
     name: homebrew-kubedmp
 
@@ -77,7 +77,8 @@ snapcrafts:
         Display output of 'kubectl cluster-info dump' nicely
   grade: stable
   confinement: strict
+  license: Apache-2.0
   apps:
     kubedmp:
-      plugs: ["home"]
+      plugs: ["home", "personal-files"]
       command: kubedmp

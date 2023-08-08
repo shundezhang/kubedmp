@@ -18,7 +18,7 @@ func prettyPrint(buffer string) {
 		log.Fatalf("Error processing buffer: %v\n%v\n", err.Error(), buffer)
 	}
 	// fmt.Println("items: ", reflect.TypeOf(result["items"]).String())
-	if len(result["items"].([]interface{})) > 0 {
+	if result["kind"] != nil && len(result["items"].([]interface{})) > 0 {
 		fmt.Println("Kind: ", result["kind"])
 		fmt.Println("================================================")
 		switch result["kind"] {

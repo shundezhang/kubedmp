@@ -71,31 +71,7 @@ It can only show detais of one resource, whose type is either node/no, pod/po, s
 			}
 			filePath = filepath.Join(dumpDir, resNamespace, filename+"."+dumpFormat)
 		}
-		// f, err := os.Open(filePath)
-		// if err != nil {
-		// 	log.Fatalf("Error to read [file=%v]: %v", filePath, err.Error())
-		// }
-		// var buffer string
-		// var inject bool
 
-		// scanner := bufio.NewScanner(f)
-
-		// for scanner.Scan() {
-		// 	line := scanner.Text()
-		// 	if line == "{" {
-		// 		buffer = line
-		// 		inject = true
-		// 	} else if line == "}" {
-		// 		buffer += line
-		// 		inject = false
-		// 		describeObject(buffer, resType, namespace, resName)
-		// 		buffer = ""
-		// 	} else if inject {
-		// 		buffer += line
-		// 	}
-		// }
-
-		// f.Close()
 		readFile(filePath, describeObject)
 
 	},
@@ -110,36 +86,38 @@ func init() {
 func describeObject(buffer string) {
 	var result map[string]interface{}
 	// fmt.Println(buffer)
-	fmt.Println(resType, resNamespace, resName)
+	// fmt.Println(resType, resNamespace, resName)
 	err := json.Unmarshal([]byte(buffer), &result)
 
 	if err != nil {
 		log.Fatalf("Error processing buffer: %v\n%v\n", err.Error(), buffer)
 	}
+	if items, ok := result["items"].([]interface{}); ok {
+		for _, item := range items {
+			// fmt.Println("item: ", reflect.TypeOf(item).String())
+			obj := item.(map[string]interface{})
+			// fmt.Println("item: ", reflect.TypeOf(node["status"]).String())
+			metadata := obj["metadata"].(map[string]interface{})
+			// fmt.Printf("object ns %s pod %s \n", metadata["namespace"], metadata["name"])
+			if (resType == "no" || resType == "node") && resName == metadata["name"] && result["kind"] == "NodeList" {
+				describeNode(item)
+			} else if (resType == "po" || resType == "pod") && resName == metadata["name"] && resNamespace == metadata["namespace"] && result["kind"] == "PodList" {
+				describePod(item)
+			} else if (resType == "svc" || resType == "service") && resName == metadata["name"] && resNamespace == metadata["namespace"] && result["kind"] == "ServiceList" {
+				describeService(item)
+			} else if (resType == "deploy" || resType == "deployment") && resName == metadata["name"] && resNamespace == metadata["namespace"] && result["kind"] == "DeploymentList" {
+				describeDeployment(item)
+			} else if (resType == "ds" || resType == "daemonset") && resName == metadata["name"] && resNamespace == metadata["namespace"] && result["kind"] == "DaemonSetList" {
+				describeDaemonSet(item)
+			} else if (resType == "rs" || resType == "replicaset") && resName == metadata["name"] && resNamespace == metadata["namespace"] && result["kind"] == "ReplicaSetList" {
+				describeReplicaSet(item)
+				// } else if namespace == metadata["namespace"] && resName == metadata["name"] {
+				// 	fmt.Println("item: ", item)
+			}
 
-	for _, item := range result["items"].([]interface{}) {
-		// fmt.Println("item: ", reflect.TypeOf(item).String())
-		obj := item.(map[string]interface{})
-		// fmt.Println("item: ", reflect.TypeOf(node["status"]).String())
-		metadata := obj["metadata"].(map[string]interface{})
-		// fmt.Printf("object ns %s pod %s \n", metadata["namespace"], metadata["name"])
-		if (resType == "no" || resType == "node") && resName == metadata["name"] && result["kind"] == "NodeList" {
-			describeNode(item)
-		} else if (resType == "po" || resType == "pod") && resName == metadata["name"] && resNamespace == metadata["namespace"] && result["kind"] == "PodList" {
-			describePod(item)
-		} else if (resType == "svc" || resType == "service") && resName == metadata["name"] && resNamespace == metadata["namespace"] && result["kind"] == "ServiceList" {
-			describeService(item)
-		} else if (resType == "deploy" || resType == "deployment") && resName == metadata["name"] && resNamespace == metadata["namespace"] && result["kind"] == "DeploymentList" {
-			describeDeployment(item)
-		} else if (resType == "ds" || resType == "daemonset") && resName == metadata["name"] && resNamespace == metadata["namespace"] && result["kind"] == "DaemonSetList" {
-			describeDaemonSet(item)
-		} else if (resType == "rs" || resType == "replicaset") && resName == metadata["name"] && resNamespace == metadata["namespace"] && result["kind"] == "ReplicaSetList" {
-			describeReplicaSet(item)
-			// } else if namespace == metadata["namespace"] && resName == metadata["name"] {
-			// 	fmt.Println("item: ", item)
 		}
-
 	}
+
 }
 
 func describeNode(item interface{}) {
@@ -408,10 +386,14 @@ func describePod(item interface{}) {
 	if tolerations, ok1 := spec["tolerations"].([]interface{}); ok1 {
 		for idx, item1 := range tolerations {
 			tlr := item1.(map[string]interface{})
+			tolKey := ""
+			if _, ok2 := tlr["key"]; ok2 {
+				tolKey = tlr["key"].(string)
+			}
 			if idx == 0 {
-				fmt.Fprintf(writer, "Tolerations:\t%s", tlr["key"])
+				fmt.Fprintf(writer, "Tolerations:\t%s", tolKey)
 			} else {
-				fmt.Fprintf(writer, "  \t%s", tlr["key"])
+				fmt.Fprintf(writer, "  \t%s", tolKey)
 			}
 			if value, ok2 := tlr["value"]; ok2 {
 				fmt.Fprintf(writer, "=%v", value)
@@ -532,6 +514,11 @@ func describeDeployment(item interface{}) {
 	writer := tabwriter.NewWriter(os.Stdout, 0, 8, 1, '\t', tabwriter.AlignRight)
 	fmt.Fprintf(writer, "Name:\t%s\n", metadata["name"])
 	fmt.Fprintf(writer, "Namespace:\t%s\n", metadata["namespace"])
+	creationTimeStr := metadata["creationTimestamp"].(string)
+	creationTime, err := time.Parse("2006-01-02T15:04:05Z", creationTimeStr)
+	if err == nil {
+		fmt.Fprintf(writer, "CreationTimestamp:\t%s\n", creationTime.Format(time.RFC1123Z))
+	}
 	describeLabels(writer, metadata["labels"])
 	describeAnnotations(writer, metadata["annotations"])
 	if selector, ok := spec["selector"].(map[string]interface{}); ok {
@@ -564,7 +551,7 @@ func describeDeployment(item interface{}) {
 	}
 	fmt.Fprintf(writer, "MinReadySeconds:\t%v\n", minReadySeconds)
 	if rollingUpdate, ok := strategy["rollingUpdate"].(map[string]interface{}); ok {
-		fmt.Fprintf(writer, "RollingUpdateStrategy:\t%s max unavailable, %s max surge\n", rollingUpdate["maxUnavailable"], rollingUpdate["maxSurge"])
+		fmt.Fprintf(writer, "RollingUpdateStrategy:\t%v max unavailable, %s max surge\n", rollingUpdate["maxUnavailable"], rollingUpdate["maxSurge"])
 	}
 	// pod template
 	template := spec["template"].(map[string]interface{})
@@ -625,6 +612,16 @@ func describeReplicaSet(item interface{}) {
 	describeLabels(writer, metadata["labels"])
 	describeAnnotations(writer, metadata["annotations"])
 
+	if controllee, ok := metadata["ownerReferences"].([]interface{}); ok {
+		for _, item := range controllee {
+			controller := item.(map[string]interface{})
+			if isController, ok1 := controller["controller"].(bool); ok1 && isController {
+				fmt.Fprintf(writer, "Controlled By:\t%s/%s\n", controller["kind"], controller["name"])
+				break
+			}
+		}
+
+	}
 	// if controlledBy := printController(rs); len(controlledBy) > 0 {
 	// 	w.Write(LEVEL_0, "Controlled By:\t%s\n", controlledBy)
 	// }
@@ -890,7 +887,7 @@ func describeEnvFromWithIndent(writer *tabwriter.Writer, cont map[string]interfa
 				from := ""
 				name := ""
 				optional := false
-				if configMapRef, ok1 := envFromMap["ConfigMapRef"].(map[string]interface{}); ok1 {
+				if configMapRef, ok1 := envFromMap["configMapRef"].(map[string]interface{}); ok1 {
 					from = "ConfigMap"
 					name = configMapRef["name"].(string)
 					optional = configMapRef["optional"].(bool)
@@ -900,9 +897,9 @@ func describeEnvFromWithIndent(writer *tabwriter.Writer, cont map[string]interfa
 					optional = secretRef["optional"].(bool)
 				}
 				if prefix, ok1 := envFromMap["prefix"].(string); ok1 && len(prefix) > 0 {
-					fmt.Fprintf(writer, "  %s%s\t%s with prefix '%s'\tOptional: %t\n", indent, name, from, prefix, optional)
+					fmt.Fprintf(writer, "    %s%s\t%s with prefix '%s'\tOptional: %t\n", indent, name, from, prefix, optional)
 				} else {
-					fmt.Fprintf(writer, "  %s%s\t%s\tOptional: %t\n", indent, name, from, optional)
+					fmt.Fprintf(writer, "    %s%s\t%s\tOptional: %t\n", indent, name, from, optional)
 				}
 			}
 		} else {

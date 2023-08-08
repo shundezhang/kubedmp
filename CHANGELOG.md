@@ -1,3 +1,3 @@
-## First release
+## version 0.4
 
-First release for brew tap
+More bug fixes
