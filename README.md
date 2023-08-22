@@ -36,6 +36,10 @@ Examples:
   
   # List all nodes
   kubedmp get no
+
+Flags:
+  -d, --dumpdir string    Path to dump dir
+  -f, --dumpfile string   Path to dump file (default "./cluster-info.dump")
 ```
 * kubedmp describe
 ```
@@ -51,6 +55,10 @@ Examples:
   
   # Describe a pod in kube-system namespace
   $ kubedmp describe po coredns-6bcf44f4cc-j9wkq -n kube-system
+
+Flags:
+  -d, --dumpdir string    Path to dump dir
+  -f, --dumpfile string   Path to dump file (default "./cluster-info.dump")
 ```
 * kubedmp logs
 ```
@@ -66,6 +74,10 @@ Examples:
   
   # Return logs of ruby container logs from pod web-1
   kubectl logs web-1 -c ruby
+
+Flags:
+  -d, --dumpdir string    Path to dump dir
+  -f, --dumpfile string   Path to dump file (default "./cluster-info.dump")
 ```
 * kubedmp show
 ```
@@ -73,6 +85,43 @@ show all objects in cluster info dump file in ps output format
 
 Usage:
   kubedmp show [flags]
+
+Flags:
+  -d, --dumpdir string    Path to dump dir
+  -f, --dumpfile string   Path to dump file (default "./cluster-info.dump")
+```
+* kubedmp dump 
+```
+Dump cluster information out suitable for debugging and diagnosing cluster problems.  By default, dumps everything to
+stdout. You can optionally specify a directory with --output-directory.  If you specify a directory, Kubernetes will
+build a set of files in that directory.  By default, only dumps things in the current namespace and 'kube-system' namespace, but you can
+switch to a different namespace with the --namespaces flag, or specify --all-namespaces to dump all namespaces.
+
+The command also dumps the logs of all of the pods in the cluster; these logs are dumped into different directories
+based on namespace and pod name.
+
+Usage:
+  kubedmp dump
+
+Examples:
+
+# Dump current cluster state to stdout
+kubedmp dump
+
+# Dump current cluster state to /path/to/cluster-state
+kubedmp dump --output-directory=/path/to/cluster-state
+
+# Dump all namespaces to stdout
+kubedmp dump --all-namespaces
+
+# Dump a set of namespaces to /path/to/cluster-state
+kubedmp dump --namespaces default,kube-system --output-directory=/path/to/cluster-state
+
+Flags:
+  -A, --all-namespaces                 If true, dump all namespaces.  If true, --namespaces is ignored.
+      --namespaces strings             A comma separated list of namespaces to dump.
+      --output-directory string        Where to output the files.  If empty or '-' uses stdout, otherwise creates a directory hierarchy in that directory
+      --pod-running-timeout duration   The length of time (like 5s, 2m, or 3h, higher than zero) to wait until at least one pod is running (default 20s)
 ```
 ## Installation
 

@@ -4,17 +4,37 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
-	"net"
-	"net/url"
-	"os"
+	// "net"
+	// "net/url"
+	// "os"
 	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
 	"text/tabwriter"
 	"time"
+	"io"
+	"bytes"
 
 	"github.com/spf13/cobra"
+	appsv1 "k8s.io/api/apps/v1"
+	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/util/sets"
+	. "k8s.io/kubectl/pkg/describe"
+	"k8s.io/apimachinery/pkg/util/duration"
+	"k8s.io/kubectl/pkg/util/qos"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	resourcehelper "k8s.io/kubectl/pkg/util/resource"
+	"k8s.io/apimachinery/pkg/api/resource"
+	storageutil "k8s.io/kubectl/pkg/util/storage"
+	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/apimachinery/pkg/util/intstr"
+)
+
+var (
+	// globally skipped annotations
+	skipAnnotations  = sets.NewString(corev1.LastAppliedConfigAnnotation)
+	maxAnnotationLen = 140
 )
 
 var describeCmd = &cobra.Command{
@@ -41,7 +61,7 @@ It can only show detais of one resource, whose type is either node/no, pod/po, s
 		// 	return
 		// }
 		if len(args) < 2 {
-			log.Fatalf("Please specify a type, e.g. node/no, pod/po, service/svc, deployment/deploy, daemonset/ds, replicaset/rs, and an object name\n")
+			log.Fatalf("Please specify a type, e.g. node/no, pod/po, service/svc, deployment/deploy, daemonset/ds, replicaset/rs, persistentvolume/pv, persistentvolumeclaim/pvc and an object name\n")
 			return
 		}
 		resType = args[0]
@@ -56,6 +76,7 @@ It can only show detais of one resource, whose type is either node/no, pod/po, s
 			switch resType {
 			case "no", "node":
 				filename = "nodes"
+				resNamespace = ""
 			case "po", "pod":
 				filename = "pods"
 			case "svc", "service":
@@ -66,8 +87,13 @@ It can only show detais of one resource, whose type is either node/no, pod/po, s
 				filename = "daemonsets"
 			case "rs", "replicaset":
 				filename = "replicasets"
+			case "pvc", "persistentvolumeclaim":
+				filename = "pvcs"
 			case "event":
 				filename = "events"
+			case "pv", "persistentvolume":
+				filename = "pvs"
+				resNamespace = ""
 			}
 			filePath = filepath.Join(dumpDir, resNamespace, filename+"."+dumpFormat)
 		}
@@ -80,7 +106,23 @@ It can only show detais of one resource, whose type is either node/no, pod/po, s
 func init() {
 	rootCmd.AddCommand(describeCmd)
 	describeCmd.Flags().StringVarP(&resNamespace, ns, "n", "default", "namespace of the resource, not applicable to node")
+	describeCmd.PersistentFlags().StringVarP(&dumpFile, dumpFileFlag, "f", "./cluster-info.dump", "Path to dump file")
+	describeCmd.PersistentFlags().StringVarP(&dumpDir, dumpDirFlag, "d", "", "Path to dump directory")
 
+}
+
+func tabbedString(f func(io.Writer) error) (string, error) {
+	out := new(tabwriter.Writer)
+	buf := &bytes.Buffer{}
+	out.Init(buf, 0, 8, 2, ' ', 0)
+
+	err := f(out)
+	if err != nil {
+		return "", err
+	}
+
+	out.Flush()
+	return buf.String(), nil
 }
 
 func describeObject(buffer string) {
@@ -90,1117 +132,1780 @@ func describeObject(buffer string) {
 	err := json.Unmarshal([]byte(buffer), &result)
 
 	if err != nil {
-		log.Fatalf("Error processing buffer: %v\n%v\n", err.Error(), buffer)
+		// log.Fatalf("Error processing buffer: %v\n%v\n", err.Error(), buffer)
+		return
 	}
-	if items, ok := result["items"].([]interface{}); ok {
-		for _, item := range items {
-			// fmt.Println("item: ", reflect.TypeOf(item).String())
-			obj := item.(map[string]interface{})
-			// fmt.Println("item: ", reflect.TypeOf(node["status"]).String())
-			metadata := obj["metadata"].(map[string]interface{})
-			// fmt.Printf("object ns %s pod %s \n", metadata["namespace"], metadata["name"])
-			if (resType == "no" || resType == "node") && resName == metadata["name"] && result["kind"] == "NodeList" {
-				describeNode(item)
-			} else if (resType == "po" || resType == "pod") && resName == metadata["name"] && resNamespace == metadata["namespace"] && result["kind"] == "PodList" {
-				describePod(item)
-			} else if (resType == "svc" || resType == "service") && resName == metadata["name"] && resNamespace == metadata["namespace"] && result["kind"] == "ServiceList" {
-				describeService(item)
-			} else if (resType == "deploy" || resType == "deployment") && resName == metadata["name"] && resNamespace == metadata["namespace"] && result["kind"] == "DeploymentList" {
-				describeDeployment(item)
-			} else if (resType == "ds" || resType == "daemonset") && resName == metadata["name"] && resNamespace == metadata["namespace"] && result["kind"] == "DaemonSetList" {
-				describeDaemonSet(item)
-			} else if (resType == "rs" || resType == "replicaset") && resName == metadata["name"] && resNamespace == metadata["namespace"] && result["kind"] == "ReplicaSetList" {
-				describeReplicaSet(item)
-				// } else if namespace == metadata["namespace"] && resName == metadata["name"] {
-				// 	fmt.Println("item: ", item)
+	if kind, ok := result["kind"].(string); ok {
+
+		if (resType == "no" || resType == "node") && kind == "NodeList" {
+			var nodeList corev1.NodeList
+			err := json.Unmarshal([]byte(buffer), &nodeList)
+			if err != nil {
+				log.Fatalf("Error parsing node list: %v\n%v\n", err.Error(), buffer)
 			}
-
-		}
-	}
-
-}
-
-func describeNode(item interface{}) {
-	node := item.(map[string]interface{})
-	metadata := node["metadata"].(map[string]interface{})
-	nodeName := metadata["name"].(string)
-
-	// fmt.Println("item: ", reflect.TypeOf(node["status"]).String())
-	status := node["status"].(map[string]interface{})
-	addresses := status["addresses"].([]interface{})
-	conditions := status["conditions"].([]interface{})
-	nodeInfo := status["nodeInfo"].(map[string]interface{})
-	// address := item.(map[string]interface{})["status"]["addresses"].(map[string]interface{})
-	creationTimeStr := metadata["creationTimestamp"].(string)
-	// fmt.Println("creationTimeStr: ", creationTimeStr)
-	labels := metadata["labels"].(map[string]interface{})
-	annotations := metadata["annotations"].(map[string]interface{})
-	role := "<none>"
-	roles := []string{}
-	labelList := []string{}
-	annotationList := []string{}
-	for k, v := range labels {
-		labelList = append(labelList, k+"="+v.(string))
-		if strings.HasPrefix(k, "node-role.kubernetes.io/") {
-			roles = append(roles, strings.Split(k, "/")[1])
-		}
-	}
-	for k, v := range annotations {
-		annotationList = append(annotationList, k+": "+v.(string))
-	}
-	if len(roles) > 0 {
-		role = strings.Join(roles, ",")
-	}
-
-	spec := node["spec"].(map[string]interface{})
-
-	var state string
-	for _, condition := range conditions {
-		cond := condition.(map[string]interface{})
-		if cond["status"] == "True" {
-			state += cond["type"].(string) + " "
-		}
-	}
-	// unschedulable := false
-	writer := tabwriter.NewWriter(os.Stdout, 0, 8, 1, '\t', tabwriter.AlignRight)
-	fmt.Fprintf(writer, "Name:\t%s\n", nodeName)
-	fmt.Fprintf(writer, "Roles:\t%s\n", role)
-	if len(labelList) == 0 {
-		fmt.Fprintf(writer, "Labels:\t<none>\n")
-	} else {
-		for i, v := range labelList {
-			if i == 0 {
-				fmt.Fprintf(writer, "Labels:\t%s\n", v)
-			} else {
-				fmt.Fprintf(writer, " \t%s\n", v)
-			}
-		}
-	}
-	if len(annotationList) == 0 {
-		fmt.Fprintf(writer, "annotationList:\t<none>\n")
-	} else {
-		for i, v := range annotationList {
-			if i == 0 {
-				fmt.Fprintf(writer, "Annotations:\t%s\n", v)
-			} else {
-				fmt.Fprintf(writer, " \t%s\n", v)
-			}
-		}
-
-	}
-
-	creationTime, err := time.Parse("2006-01-02T15:04:05Z", creationTimeStr)
-	if err == nil {
-		fmt.Fprintf(writer, "CreationTimestamp:\t%s\n", creationTime.Format(time.RFC1123Z))
-	}
-
-	if taints, ok := spec["taints"].([]interface{}); ok {
-		for i, v := range taints {
-			taint := v.(map[string]interface{})
-			if i == 0 {
-				fmt.Fprintf(writer, "Taints:\t%s\n", taint["key"].(string)+":"+taint["effect"].(string))
-			} else {
-				fmt.Fprintf(writer, " \t%s\n", taint["key"].(string)+":"+taint["effect"].(string))
-			}
-		}
-	} else {
-		fmt.Fprintf(writer, "Taints:\t<none>\n")
-	}
-
-	if unschedulable, ok := spec["unschedulable"]; ok {
-		fmt.Fprintf(writer, "Unschedulable:\t%t\n", unschedulable)
-	}
-	fmt.Fprintf(writer, "Conditions:\n")
-
-	writer.Flush()
-	fmt.Fprintf(writer, "  Type\tStatus\tLastHeartbeatTime\tLastTransitionTime\tReason\tMessage\n")
-	fmt.Fprintf(writer, "  ----\t------\t-----------------\t------------------\t------\t-------\n")
-	for _, item := range conditions {
-		cond := item.(map[string]interface{})
-		lastHeartbeatTime, _ := time.Parse("2006-01-02T15:04:05Z", cond["lastHeartbeatTime"].(string))
-		lastTransitionTime, _ := time.Parse("2006-01-02T15:04:05Z", cond["lastTransitionTime"].(string))
-		fmt.Fprintf(writer, "  %s \t%s \t%s \t%s \t%s \t%s\n", cond["type"], cond["status"], lastHeartbeatTime.Format(time.RFC1123Z), lastTransitionTime.Format(time.RFC1123Z), cond["reason"], cond["message"])
-	}
-	writer.Flush()
-	fmt.Fprintf(writer, "Addresses:\n")
-	for _, item := range addresses {
-		addr := item.(map[string]interface{})
-		fmt.Fprintf(writer, "  %s:\t%s\n", addr["type"], addr["address"])
-	}
-	writer.Flush()
-	fmt.Fprintf(writer, "Capacity:\n")
-	capacity := status["capacity"].(map[string]interface{})
-	for k, v := range capacity {
-		fmt.Fprintf(writer, "  %s:\t%s\n", k, v)
-	}
-	fmt.Fprintf(writer, "Allocatable:\n")
-	allocatable := status["allocatable"].(map[string]interface{})
-	for k, v := range allocatable {
-		fmt.Fprintf(writer, "  %s:\t%s\n", k, v)
-	}
-	fmt.Fprintf(writer, "System Info:\n")
-	fmt.Fprintf(writer, "  Machine ID:\t%s\n", nodeInfo["machineID"])
-	fmt.Fprintf(writer, "  System UUID:\t%s\n", nodeInfo["systemUUID"])
-	fmt.Fprintf(writer, "  Boot ID:\t%s\n", nodeInfo["bootID"])
-	fmt.Fprintf(writer, "  Kernel Version:\t%s\n", nodeInfo["kernelVersion"])
-	fmt.Fprintf(writer, "  OS Image:\t%s\n", nodeInfo["osImage"])
-	fmt.Fprintf(writer, "  Operating System:\t%s\n", nodeInfo["operatingSystem"])
-	fmt.Fprintf(writer, "  Architecture:\t%s\n", nodeInfo["architecture"])
-	fmt.Fprintf(writer, "  Container Runtime Version:\t%s\n", nodeInfo["containerRuntimeVersion"])
-	fmt.Fprintf(writer, "  Kubelet Version:\t%s\n", nodeInfo["kubeletVersion"])
-	fmt.Fprintf(writer, "  Kube-Proxy Version:\t%s\n", nodeInfo["kubeProxyVersion"])
-
-	if podCIDR, ok := spec["podCIDR"]; ok {
-		fmt.Fprintf(writer, "PodCIDR:\t%s\n", podCIDR)
-	}
-	if podCIDRs, ok := spec["podCIDRs"]; ok {
-		podCIDRList := podCIDRs.([]string)
-		fmt.Fprintf(writer, "PodCIDRs:\t%s\n", strings.Join(podCIDRList, ","))
-	}
-	if providerID, ok := spec["providerID"]; ok {
-		fmt.Fprintf(writer, "ProviderID:\t%s\n", providerID)
-	}
-	writer.Flush()
-}
-
-func describePod(item interface{}) {
-	pod := item.(map[string]interface{})
-	metadata := pod["metadata"].(map[string]interface{})
-	status := pod["status"].(map[string]interface{})
-	spec := pod["spec"].(map[string]interface{})
-
-	creationTimeStr := metadata["creationTimestamp"].(string)
-	// fmt.Println("metadata: ", metadata)
-
-	writer := tabwriter.NewWriter(os.Stdout, 0, 8, 1, '\t', tabwriter.AlignRight)
-	fmt.Fprintf(writer, "Name:\t%s\n", metadata["name"])
-	fmt.Fprintf(writer, "Namespace:\t%s\n", metadata["namespace"])
-	fmt.Fprintf(writer, "Priority:\t%s\n", strconv.FormatInt(int64(spec["priority"].(float64)), 10))
-	fmt.Fprintf(writer, "Service Account:\t%s\n", spec["serviceAccount"])
-
-	if nodeName, ok := spec["nodeName"]; ok {
-		fmt.Fprintf(writer, "Node:\t%s\n", nodeName.(string)+"/"+status["hostIP"].(string))
-	}
-
-	creationTime, err := time.Parse("2006-01-02T15:04:05Z", creationTimeStr)
-	if err == nil {
-		fmt.Fprintf(writer, "Start Time:\t%s\n", creationTime.Format(time.RFC1123Z))
-	}
-
-	describeLabels(writer, metadata["labels"])
-	describeAnnotations(writer, metadata["annotations"])
-
-	fmt.Fprintf(writer, "Status:\t%s\n", status["phase"])
-
-	if podIP, ok := status["podIP"]; ok {
-		fmt.Fprintf(writer, "IP:\t%s\n", podIP)
-	}
-	if podIPs, ok := status["podIPs"]; ok {
-		podIPList := podIPs.([]interface{})
-		fmt.Fprintf(writer, "IPs:\n")
-		for _, item1 := range podIPList {
-			ip := item1.(map[string]interface{})
-			fmt.Fprintf(writer, "  IP:\t%s\n", ip["ip"])
-		}
-	}
-
-	if controllee, ok := metadata["ownerReferences"].([]interface{}); ok {
-		for _, item := range controllee {
-			controller := item.(map[string]interface{})
-			if isController, ok1 := controller["controller"].(bool); ok1 && isController {
-				fmt.Fprintf(writer, "Controlled By:\t%s/%s\n", controller["kind"], controller["name"])
-				break
-			}
-		}
-
-	}
-	fmt.Fprintf(writer, "Containers:\n")
-
-	statuses := make(map[string]interface{})
-	if containerStatuses, ok := status["containerStatuses"].([]interface{}); ok {
-		for _, item3 := range containerStatuses {
-			cStatus := item3.(map[string]interface{})
-			statuses[cStatus["name"].(string)] = cStatus
-		}
-	}
-	for _, item1 := range spec["containers"].([]interface{}) {
-		cont := item1.(map[string]interface{})
-		status, ok := statuses[cont["name"].(string)].(map[string]interface{})
-		describeContainerBasicInfoWithIndent(writer, cont, status, ok, "  ")
-		describeContainerCommandWithIndent(writer, cont, "  ")
-
-		if ok {
-			describeContainerStatusWithIndent(writer, status, "  ")
-		}
-		describeContainerResourcesWithIndent(writer, cont, "  ")
-		describeContainerProbeWithIndent(writer, cont, "  ")
-		describeEnvFromWithIndent(writer, cont, "  ")
-		describeEnvVarsWithIndent(writer, cont, "  ")
-		describeVolumeMountsWithIndent(writer, cont, "  ")
-	}
-
-	// if ok {
-	// 	for _, item1 := range containerStatuses {
-	// 		cStatus := item1.(map[string]interface{})
-	// 		if cStatus["ready"] == true {
-	// 			ready++
-	// 		}
-	// 	}
-	// 	if len(containerStatuses) > 0 {
-	// 		firstStatus := containerStatuses[0].(map[string]interface{})
-	// 		restartCount = strconv.FormatInt(int64((firstStatus["restartCount"].(float64))), 10)
-	// 	}
-	// 	startTimeStr := status["startTime"].(string)
-	// 	age = getAge(startTimeStr)
-	// }
-	// address := item.(map[string]interface{})["status"]["addresses"].(map[string]interface{})
-
-	if conditions, ok1 := status["conditions"].([]interface{}); ok1 {
-		fmt.Fprintf(writer, "Conditions:\n")
-		fmt.Fprintf(writer, "  Type\tStatus\n")
-		for _, item1 := range conditions {
-			cond := item1.(map[string]interface{})
-			fmt.Fprintf(writer, "  %v \t%v \n", cond["type"], cond["status"])
-		}
-
-	}
-	describeVolumesWithIndent(writer, spec["volumes"], "")
-
-	if qos, ok1 := status["qosClass"]; ok1 {
-		fmt.Fprintf(writer, "QoS Class:\t%s\n", qos)
-	}
-	if nodeSelector, ok1 := spec["nodeSelector"].(map[string]interface{}); ok1 {
-		idx := 0
-		for k, v := range nodeSelector {
-			if idx == 0 {
-				fmt.Fprintf(writer, "Node-Selectors:\t%s=%s\n", k, v)
-			} else {
-				fmt.Fprintf(writer, "  \t%s=%s\n", k, v)
-			}
-			idx++
-
-		}
-	} else {
-		fmt.Fprintf(writer, "Node-Selectors:\t<none>\n")
-	}
-	if tolerations, ok1 := spec["tolerations"].([]interface{}); ok1 {
-		for idx, item1 := range tolerations {
-			tlr := item1.(map[string]interface{})
-			tolKey := ""
-			if _, ok2 := tlr["key"]; ok2 {
-				tolKey = tlr["key"].(string)
-			}
-			if idx == 0 {
-				fmt.Fprintf(writer, "Tolerations:\t%s", tolKey)
-			} else {
-				fmt.Fprintf(writer, "  \t%s", tolKey)
-			}
-			if value, ok2 := tlr["value"]; ok2 {
-				fmt.Fprintf(writer, "=%v", value)
-			}
-			if effect, ok2 := tlr["effect"]; ok2 {
-				fmt.Fprintf(writer, ":%v", effect)
-			}
-			if op, ok2 := tlr["operator"]; ok2 {
-				fmt.Fprintf(writer, " op=%s", op)
-			}
-			if tlrSec, ok2 := tlr["tolerationSeconds"]; ok2 {
-				fmt.Fprintf(writer, " for %ss", strconv.FormatInt(int64((tlrSec.(float64))), 10))
-			}
-			fmt.Fprintf(writer, "\n")
-		}
-	} else {
-		fmt.Fprintf(writer, "Tolerations:\t<none>\n")
-	}
-	// events
-	writer.Flush()
-
-}
-
-func describeService(item interface{}) {
-	service := item.(map[string]interface{})
-	metadata := service["metadata"].(map[string]interface{})
-	status := service["status"].(map[string]interface{})
-	spec := service["spec"].(map[string]interface{})
-	writer := tabwriter.NewWriter(os.Stdout, 0, 8, 1, '\t', tabwriter.AlignRight)
-	fmt.Fprintf(writer, "Name:\t%s\n", metadata["name"])
-	fmt.Fprintf(writer, "Namespace:\t%s\n", metadata["namespace"])
-	describeLabels(writer, metadata["labels"])
-	describeAnnotations(writer, metadata["annotations"])
-	describeSelector(writer, spec["selector"], "Selector")
-
-	fmt.Fprintf(writer, "Type:\t%s\n", spec["type"])
-	fmt.Fprintf(writer, "IP Family Policy:\t%s\n", spec["ipFamilyPolicy"])
-	if ipFamilies, ok := spec["ipFamilies"].([]interface{}); ok {
-		famList := []string{}
-		for _, fam := range ipFamilies {
-			famList = append(famList, fam.(string))
-		}
-		fmt.Fprintf(writer, "IP Families:\t%s\n", strings.Join(famList, ","))
-	} else {
-		fmt.Fprintf(writer, "IP Families:\t<none>\n")
-	}
-	fmt.Fprintf(writer, "IP:\t%s\n", spec["clusterIP"])
-	if clusterIPs, ok := spec["clusterIPs"].([]interface{}); ok {
-		ipList := []string{}
-		for _, ip := range clusterIPs {
-			ipList = append(ipList, ip.(string))
-		}
-		fmt.Fprintf(writer, "IPs:\t%s\n", strings.Join(ipList, ","))
-	} else {
-		fmt.Fprintf(writer, "IPs:\t<none>\n")
-	}
-	if externalIPs, ok := spec["externalIPs"].([]interface{}); ok {
-		ipList := []string{}
-		for _, ip := range externalIPs {
-			ipList = append(ipList, ip.(string))
-		}
-		fmt.Fprintf(writer, "External IPs:\t%s\n", strings.Join(ipList, ","))
-	}
-	if loadBalancerIP, ok := spec["loadBalancerIP"]; ok {
-		fmt.Fprintf(writer, "IP:\t%s\n", loadBalancerIP)
-	}
-	if externalName, ok := spec["externalName"]; ok {
-		fmt.Fprintf(writer, "External Name:\t%s\n", externalName)
-	}
-	if loadBalancer, ok := status["loadBalancer"].(map[string]interface{}); ok {
-		if ingress, ok1 := loadBalancer["ingress"].([]interface{}); ok1 {
-			ingList := []string{}
-			for _, ing := range ingress {
-				ingMap := ing.(map[string]interface{})
-				if _, ok2 := ingMap["ip"]; ok2 && ingMap["ip"] != "" {
-					ingList = append(ingList, ingMap["ip"].(string))
-				} else {
-					ingList = append(ingList, ingMap["hostname"].(string))
-				}
-
-			}
-			fmt.Fprintf(writer, "LoadBalancer Ingress:\t%s\n", strings.Join(ingList, ","))
-		}
-	}
-	ports := spec["ports"].([]interface{})
-	for _, port := range ports {
-		portMap := port.(map[string]interface{})
-		portName := portMap["name"]
-		// fmt.Println(portName)
-		if portName == nil || portName == "" {
-			portName = "<unset>"
-		}
-		fmt.Fprintf(writer, "Port:\t%s\t%v/%s\n", portName, portMap["port"], portMap["protocol"])
-		fmt.Fprintf(writer, "TargetPort:\t%v/%s\n", portMap["targetPort"], portMap["protocol"])
-	}
-	// fmt.Fprintf(writer, "Endpoints:\t%s\n", spec["type"])
-	fmt.Fprintf(writer, "Session Affinity:\t%s\n", spec["sessionAffinity"])
-	if externalTrafficPolicy, ok := spec["externalTrafficPolicy"]; ok {
-		fmt.Fprintf(writer, "External Traffic Policy:\t%s\n", externalTrafficPolicy)
-	}
-	if healthCheckNodePort, ok := spec["healthCheckNodePort"]; ok {
-		fmt.Fprintf(writer, "HealthCheck NodePort:\t%v\n", healthCheckNodePort)
-	}
-	if loadBalancerSourceRanges, ok := spec["loadBalancerSourceRanges"].([]interface{}); ok {
-		srcList := []string{}
-		for _, srcRange := range loadBalancerSourceRanges {
-			srcList = append(srcList, srcRange.(string))
-		}
-		fmt.Fprintf(writer, "LoadBalancer Source Ranges:\t%s\n", strings.Join(srcList, ","))
-	}
-	writer.Flush()
-}
-func describeDeployment(item interface{}) {
-	deploy := item.(map[string]interface{})
-	metadata := deploy["metadata"].(map[string]interface{})
-	status := deploy["status"].(map[string]interface{})
-	spec := deploy["spec"].(map[string]interface{})
-	writer := tabwriter.NewWriter(os.Stdout, 0, 8, 1, '\t', tabwriter.AlignRight)
-	fmt.Fprintf(writer, "Name:\t%s\n", metadata["name"])
-	fmt.Fprintf(writer, "Namespace:\t%s\n", metadata["namespace"])
-	creationTimeStr := metadata["creationTimestamp"].(string)
-	creationTime, err := time.Parse("2006-01-02T15:04:05Z", creationTimeStr)
-	if err == nil {
-		fmt.Fprintf(writer, "CreationTimestamp:\t%s\n", creationTime.Format(time.RFC1123Z))
-	}
-	describeLabels(writer, metadata["labels"])
-	describeAnnotations(writer, metadata["annotations"])
-	if selector, ok := spec["selector"].(map[string]interface{}); ok {
-		if _, ok1 := selector["matchLabels"]; ok1 {
-			describeSelector(writer, selector["matchLabels"], "Selector")
-		}
-	}
-	var updatedReplicas int64
-	if _, ok := status["updatedReplicas"]; ok {
-		updatedReplicas = (int64)(status["updatedReplicas"].(float64))
-	}
-	var replicas int64
-	if _, ok := status["replicas"]; ok {
-		replicas = (int64)(status["replicas"].(float64))
-	}
-	var availableReplicas int64
-	if _, ok := status["availableReplicas"]; ok {
-		availableReplicas = (int64)(status["availableReplicas"].(float64))
-	}
-	var unavailableReplicas int64
-	if _, ok := status["unavailableReplicas"]; ok {
-		unavailableReplicas = (int64)(status["unavailableReplicas"].(float64))
-	}
-	fmt.Fprintf(writer, "Replicas:\t%v desired | %v updated | %v total | %v available | %d unavailable\n", spec["replicas"], updatedReplicas, replicas, availableReplicas, unavailableReplicas)
-	strategy := spec["strategy"].(map[string]interface{})
-	fmt.Fprintf(writer, "StrategyType:\t%s\n", strategy["type"])
-	var minReadySeconds int64
-	if _, ok := spec["minReadySeconds"]; ok {
-		minReadySeconds = (int64)(spec["minReadySeconds"].(float64))
-	}
-	fmt.Fprintf(writer, "MinReadySeconds:\t%v\n", minReadySeconds)
-	if rollingUpdate, ok := strategy["rollingUpdate"].(map[string]interface{}); ok {
-		fmt.Fprintf(writer, "RollingUpdateStrategy:\t%v max unavailable, %s max surge\n", rollingUpdate["maxUnavailable"], rollingUpdate["maxSurge"])
-	}
-	// pod template
-	template := spec["template"].(map[string]interface{})
-	describePodTemplate(writer, template)
-
-	describeConditions(writer, status["conditions"])
-
-	writer.Flush()
-}
-
-func describeDaemonSet(item interface{}) {
-	daemon := item.(map[string]interface{})
-	metadata := daemon["metadata"].(map[string]interface{})
-	status := daemon["status"].(map[string]interface{})
-	spec := daemon["spec"].(map[string]interface{})
-	template := spec["template"].(map[string]interface{})
-	templateSpec := template["spec"].(map[string]interface{})
-	writer := tabwriter.NewWriter(os.Stdout, 0, 8, 1, '\t', tabwriter.AlignRight)
-	fmt.Fprintf(writer, "Name:\t%s\n", metadata["name"])
-	if selector, ok := spec["selector"].(map[string]interface{}); ok {
-		if _, ok1 := selector["matchLabels"]; ok1 {
-			describeSelector(writer, selector["matchLabels"], "Selector")
-		}
-	}
-	if nodeSelector, ok := templateSpec["nodeSelector"].(map[string]interface{}); ok {
-		describeSelector(writer, nodeSelector, "Node-Selector")
-	}
-	// fmt.Fprintf(writer, "Namespace:\t%s\n", metadata["namespace"])
-	describeLabels(writer, metadata["labels"])
-	describeAnnotations(writer, metadata["annotations"])
-	fmt.Fprintf(writer, "Desired Number of Nodes Scheduled: %v\n", status["desiredNumberScheduled"])
-	fmt.Fprintf(writer, "Current Number of Nodes Scheduled: %v\n", status["currentNumberScheduled"])
-	fmt.Fprintf(writer, "Number of Nodes Scheduled with Up-to-date Pods: %v\n", status["updatedNumberScheduled"])
-	fmt.Fprintf(writer, "Number of Nodes Scheduled with Available Pods: %v\n", status["numberAvailable"])
-	fmt.Fprintf(writer, "Number of Nodes Misscheduled: %v\n", status["numberMisscheduled"])
-	// fmt.Fprintf(writer, "Pods Status:\t%d Running / %d Waiting / %d Succeeded / %d Failed\n", running, waiting, succeeded, failed)
-	// pod template
-	describePodTemplate(writer, template)
-	// describeVolumesWithIndent(writer, templateSpec["volumes"], "  ")
-	writer.Flush()
-}
-
-func describeReplicaSet(item interface{}) {
-	rs := item.(map[string]interface{})
-	metadata := rs["metadata"].(map[string]interface{})
-	status := rs["status"].(map[string]interface{})
-	spec := rs["spec"].(map[string]interface{})
-	template := spec["template"].(map[string]interface{})
-	// templateSpec := template["spec"].(map[string]interface{})
-	writer := tabwriter.NewWriter(os.Stdout, 0, 8, 1, '\t', tabwriter.AlignRight)
-	fmt.Fprintf(writer, "Name:\t%s\n", metadata["name"])
-	fmt.Fprintf(writer, "Namespace:\t%s\n", metadata["namespace"])
-	if selector, ok := spec["selector"].(map[string]interface{}); ok {
-		if _, ok1 := selector["matchLabels"]; ok1 {
-			describeSelector(writer, selector["matchLabels"], "Selector")
-		}
-	}
-	describeLabels(writer, metadata["labels"])
-	describeAnnotations(writer, metadata["annotations"])
-
-	if controllee, ok := metadata["ownerReferences"].([]interface{}); ok {
-		for _, item := range controllee {
-			controller := item.(map[string]interface{})
-			if isController, ok1 := controller["controller"].(bool); ok1 && isController {
-				fmt.Fprintf(writer, "Controlled By:\t%s/%s\n", controller["kind"], controller["name"])
-				break
-			}
-		}
-
-	}
-	// if controlledBy := printController(rs); len(controlledBy) > 0 {
-	// 	w.Write(LEVEL_0, "Controlled By:\t%s\n", controlledBy)
-	// }
-	fmt.Fprintf(writer, "Replicas:\t%v current / %v desired\n", status["replicas"], spec["replicas"])
-	// fmt.Fprintf(writer, "Pods Status:\t")
-	// if getPodErr != nil {
-	// 	fmt.Fprintf(writer, "error in fetching pods: %s\n", getPodErr)
-	// } else {
-	// 	w.Write(LEVEL_0, "%d Running / %d Waiting / %d Succeeded / %d Failed\n", running, waiting, succeeded, failed)
-	// }
-	describePodTemplate(writer, template)
-
-	describeConditions(writer, status["conditions"])
-	writer.Flush()
-}
-
-func describeLabels(writer *tabwriter.Writer, labels interface{}) {
-	describeLabelsWithIndent(writer, labels, "")
-}
-
-func describeLabelsWithIndent(writer *tabwriter.Writer, labels interface{}, indent string) {
-	labelList := []string{}
-	if labels != nil {
-		labelMap := labels.(map[string]interface{})
-		for k, v := range labelMap {
-			labelList = append(labelList, k+"="+v.(string))
-		}
-	}
-	if len(labelList) == 0 {
-		fmt.Fprintf(writer, "%sLabels:\t<none>\n", indent)
-	} else {
-		for i, v := range labelList {
-			if i == 0 {
-				fmt.Fprintf(writer, "%sLabels:\t%s\n", indent, v)
-			} else {
-				fmt.Fprintf(writer, " %s\t%s\n", indent, v)
-			}
-		}
-	}
-}
-
-func describeAnnotations(writer *tabwriter.Writer, annotations interface{}) {
-	describeAnnotationsWithIndent(writer, annotations, "")
-}
-
-func describeAnnotationsWithIndent(writer *tabwriter.Writer, annotations interface{}, indent string) {
-	annotationList := []string{}
-	if annotations != nil {
-		lannotationMap := annotations.(map[string]interface{})
-		for k, v := range lannotationMap {
-			if k != "kubectl.kubernetes.io/last-applied-configuration" {
-				annotationList = append(annotationList, k+": "+v.(string))
-			}
-		}
-	}
-	if len(annotationList) == 0 {
-		fmt.Fprintf(writer, "%sAnnotations:\t<none>\n", indent)
-	} else {
-		for i, v := range annotationList {
-			if i == 0 {
-				fmt.Fprintf(writer, "%sAnnotations:\t%s\n", indent, v)
-			} else {
-				fmt.Fprintf(writer, " %s\t%s\n", indent, v)
-			}
-		}
-
-	}
-}
-
-func describeContainerBasicInfoWithIndent(writer *tabwriter.Writer, cont map[string]interface{}, status map[string]interface{}, ok bool, indent string) {
-	fmt.Fprintf(writer, "%s%s:\n", indent, cont["name"])
-	if ok {
-		fmt.Fprintf(writer, "  %sContainer ID:\t%s\n", indent, status["containerID"])
-	}
-	fmt.Fprintf(writer, "  %sImage:\t%s\n", indent, cont["image"])
-	if ok {
-		fmt.Fprintf(writer, "  %sImage ID:\t%s\n", indent, status["imageID"])
-	}
-	portList := []string{}
-	hostPortList := []string{}
-	if ports, ok := cont["ports"].([]interface{}); ok {
-		for _, port := range ports {
-			portMap := port.(map[string]interface{})
-			if containerPort, ok1 := portMap["containerPort"]; ok1 {
-				portList = append(portList, fmt.Sprintf("%v/%s", containerPort, portMap["protocol"]))
-			} else {
-				portList = append(portList, fmt.Sprintf("0/%s", portMap["protocol"]))
-			}
-			if hostPort, ok1 := portMap["hostPort"]; ok1 {
-				hostPortList = append(hostPortList, fmt.Sprintf("%v/%s", hostPort, portMap["protocol"]))
-			} else {
-				hostPortList = append(hostPortList, fmt.Sprintf("0/%s", portMap["protocol"]))
-			}
-		}
-		fmt.Fprintf(writer, "  %sPort:\t%s\n", indent, strings.Join(portList, ", "))
-		fmt.Fprintf(writer, "  %sHost Port:\t%s\n", indent, strings.Join(hostPortList, ", "))
-	}
-	if len(portList) == 0 {
-		fmt.Fprintf(writer, "  %sPort:\t<none>\n", indent)
-	}
-	if len(hostPortList) == 0 {
-		fmt.Fprintf(writer, "  %sHost Port:\t<none>\n", indent)
-	}
-}
-
-func describeContainerCommandWithIndent(writer *tabwriter.Writer, cont map[string]interface{}, indent string) {
-	if command, ok := cont["command"].([]interface{}); ok {
-		fmt.Fprintf(writer, "  %sCommand:\n", indent)
-		for _, item2 := range command {
-			fmt.Fprintf(writer, "    %s%s\n", indent, item2)
-		}
-	}
-	if args, ok := cont["args"].([]interface{}); ok {
-		fmt.Fprintf(writer, "  %sArgs:\n", indent)
-		for _, item2 := range args {
-			fmt.Fprintf(writer, "    %s%s\n", indent, item2)
-		}
-	}
-}
-
-func describeContainerStatusWithIndent(writer *tabwriter.Writer, status map[string]interface{}, indent string) {
-
-	if state, ok1 := status["state"].(map[string]interface{}); ok1 {
-		describeContainerStateWithIndent(writer, state, "State", indent)
-	}
-	if lastState, ok1 := status["lastState"].(map[string]interface{}); ok1 {
-		if _, ok2 := lastState["terminated"]; ok2 {
-			describeContainerStateWithIndent(writer, lastState, "Last State", indent)
-		}
-	}
-	fmt.Fprintf(writer, "  %sReady:\t%v\n", indent, status["ready"])
-	fmt.Fprintf(writer, "  %sRestart Count:\t%v\n", indent, status["restartCount"])
-}
-
-func describeContainerStateWithIndent(writer *tabwriter.Writer, state map[string]interface{}, stateName string, indent string) {
-	if cRunning, ok2 := state["running"]; ok2 {
-		cRunningMap := cRunning.(map[string]interface{})
-		fmt.Fprintf(writer, "  %s%s:\tRunning\n", indent, stateName)
-		startedTimeStr := cRunningMap["startedAt"].(string)
-		startedTime, err := time.Parse("2006-01-02T15:04:05Z", startedTimeStr)
-		if err == nil {
-			fmt.Fprintf(writer, "    %sStarted:\t%s\n", indent, startedTime.Format(time.RFC1123Z))
-		}
-	} else if cWaiting, ok2 := state["waiting"]; ok2 {
-		cWaitingMap := cWaiting.(map[string]interface{})
-		fmt.Fprintf(writer, "  %s%s:\tWaiting\n", indent, stateName)
-		if reasonStr, ok3 := cWaitingMap["reason"]; ok3 {
-			fmt.Fprintf(writer, "    %sReason:\t%s\n", indent, reasonStr)
-		}
-	} else if cTerminated, ok2 := state["terminated"]; ok2 {
-		cTerminatedMap := cTerminated.(map[string]interface{})
-		fmt.Fprintf(writer, "  %s%s:\tTerminated\n", indent, stateName)
-		if reasonStr, ok3 := cTerminatedMap["reason"]; ok3 {
-			fmt.Fprintf(writer, "    %sReason:\t%s\n", indent, reasonStr)
-		}
-		if messageStr, ok3 := cTerminatedMap["message"]; ok3 {
-			fmt.Fprintf(writer, "    %sMessage:\t%s\n", indent, messageStr)
-		}
-		fmt.Fprintf(writer, "    %sExit Code:\t%v\n", indent, cTerminatedMap["exitCode"])
-		if signalStr, ok3 := cTerminatedMap["signal"]; ok3 {
-			fmt.Fprintf(writer, "    %sSignal:\t%s\n", indent, signalStr)
-		}
-		startedTimeStr := cTerminatedMap["startedAt"].(string)
-		startedTime, err := time.Parse("2006-01-02T15:04:05Z", startedTimeStr)
-		if err == nil {
-			fmt.Fprintf(writer, "    %sStarted:\t%s\n", indent, startedTime.Format(time.RFC1123Z))
-		}
-		finishedTimeStr := cTerminatedMap["startedAt"].(string)
-		finishedTime, err := time.Parse("2006-01-02T15:04:05Z", finishedTimeStr)
-		if err == nil {
-			fmt.Fprintf(writer, "    %sFinished:\t%s\n", indent, finishedTime.Format(time.RFC1123Z))
-		}
-	} else {
-		fmt.Fprintf(writer, "  %s%s:\tWaiting\n", indent, stateName)
-	}
-}
-
-func describeContainerResourcesWithIndent(writer *tabwriter.Writer, cont map[string]interface{}, indent string) {
-	resources := cont["resources"].(map[string]interface{})
-	if limits, ok4 := resources["limits"].(map[string]interface{}); ok4 {
-		fmt.Fprintf(writer, "  %sLimits:\n", indent)
-		for k, v := range limits {
-			fmt.Fprintf(writer, "    %s%s:\t%s\n", indent, k, v)
-		}
-	}
-	if reqs, ok4 := resources["requests"].(map[string]interface{}); ok4 {
-		fmt.Fprintf(writer, "  %sRequests:\n", indent)
-		for k, v := range reqs {
-			fmt.Fprintf(writer, "    %s%s:\t%s\n", indent, k, v)
-		}
-	}
-}
-
-func describeContainerProbeWithIndent(writer *tabwriter.Writer, cont map[string]interface{}, indent string) {
-	if livenessProbe, ok4 := cont["livenessProbe"].(map[string]interface{}); ok4 {
-		fmt.Fprintf(writer, "  %sLiveness:\t%s", indent, describeProbe(livenessProbe))
-	}
-	if readinessProbe, ok4 := cont["readinessProbe"].(map[string]interface{}); ok4 {
-		fmt.Fprintf(writer, "  %sReadiness:\t%s", indent, describeProbe(readinessProbe))
-	}
-	if startupProbe, ok4 := cont["startupProbe"].(map[string]interface{}); ok4 {
-		fmt.Fprintf(writer, "  %sStartup:\t%s", indent, describeProbe(startupProbe))
-	}
-}
-
-func describeProbe(probe map[string]interface{}) string {
-	initialDelaySeconds := 0
-	if _, ok1 := probe["initialDelaySeconds"]; ok1 {
-		initialDelaySeconds = int(probe["initialDelaySeconds"].(float64))
-	}
-	timeoutSeconds := 0
-	if _, ok1 := probe["timeoutSeconds"]; ok1 {
-		timeoutSeconds = int(probe["timeoutSeconds"].(float64))
-	}
-	periodSeconds := 0
-	if _, ok1 := probe["periodSeconds"]; ok1 {
-		periodSeconds = int(probe["periodSeconds"].(float64))
-	}
-	successThreshold := 0
-	if _, ok1 := probe["successThreshold"]; ok1 {
-		successThreshold = int(probe["successThreshold"].(float64))
-	}
-	failureThreshold := 0
-	if _, ok1 := probe["failureThreshold"]; ok1 {
-		failureThreshold = int(probe["failureThreshold"].(float64))
-	}
-	attrs := fmt.Sprintf("delay=%vs timeout=%vs period=%vs #success=%v #failure=%v", initialDelaySeconds, timeoutSeconds, periodSeconds, successThreshold, failureThreshold)
-	if _, ok5 := probe["exec"]; ok5 {
-		probe := probe["exec"].(map[string]interface{})
-		return fmt.Sprintf("exec %v %s\n", probe["command"], attrs)
-	} else if _, ok5 := probe["httpGet"]; ok5 {
-		probe := probe["httpGet"].(map[string]interface{})
-		url := &url.URL{}
-		url.Scheme = strings.ToLower(probe["scheme"].(string))
-		host := ""
-		if _, ok6 := probe["host"]; ok6 {
-			host = probe["host"].(string)
-		}
-		if _, ok6 := probe["port"]; ok6 {
-			url.Host = net.JoinHostPort(host, strconv.FormatInt(int64(probe["port"].(float64)), 10))
-		} else {
-			url.Host = host
-		}
-		url.Path = probe["path"].(string)
-		return fmt.Sprintf("http-get %s %s\n", url.String(), attrs)
-	} else if _, ok5 := probe["tcpSocket"]; ok5 {
-		probe := probe["tcpSocket"].(map[string]interface{})
-		return fmt.Sprintf("tcp-socket %s:%s %s\n", probe["host"], probe["port"], attrs)
-	} else if _, ok5 := probe["grpc"]; ok5 {
-		probe := probe["grpc"].(map[string]interface{})
-		return fmt.Sprintf("grpc <pod>:%d %s %s\n", probe["port"], probe["service"], attrs)
-	} else {
-		return fmt.Sprintf("unknown %s\n", attrs)
-	}
-
-}
-func describeEnvFromWithIndent(writer *tabwriter.Writer, cont map[string]interface{}, indent string) {
-	if envFroms, ok := cont["envFrom"].([]interface{}); ok {
-		if len(envFroms) > 0 {
-			fmt.Fprintf(writer, "  %sEnvironment Variables from:\n", indent)
-			for _, envFrom := range envFroms {
-				envFromMap := envFrom.(map[string]interface{})
-				from := ""
-				name := ""
-				optional := false
-				if configMapRef, ok1 := envFromMap["configMapRef"].(map[string]interface{}); ok1 {
-					from = "ConfigMap"
-					name = configMapRef["name"].(string)
-					optional = configMapRef["optional"].(bool)
-				} else if secretRef, ok1 := envFromMap["secretRef"].(map[string]interface{}); ok1 {
-					from = "Secret"
-					name = secretRef["name"].(string)
-					optional = secretRef["optional"].(bool)
-				}
-				if prefix, ok1 := envFromMap["prefix"].(string); ok1 && len(prefix) > 0 {
-					fmt.Fprintf(writer, "    %s%s\t%s with prefix '%s'\tOptional: %t\n", indent, name, from, prefix, optional)
-				} else {
-					fmt.Fprintf(writer, "    %s%s\t%s\tOptional: %t\n", indent, name, from, optional)
-				}
-			}
-		} else {
-			fmt.Fprintf(writer, "  %sEnvironment Variables from:\t<none>\n", indent)
-		}
-	}
-}
-func describeEnvVarsWithIndent(writer *tabwriter.Writer, cont map[string]interface{}, indent string) {
-	if envs, ok4 := cont["env"].([]interface{}); ok4 {
-		fmt.Fprintf(writer, "  %sEnvironment:\n", indent)
-		for _, env := range envs {
-			envMap := env.(map[string]interface{})
-			if valueFrom, ok5 := envMap["valueFrom"].(map[string]interface{}); ok5 {
-				if fieldRef, ok6 := valueFrom["fieldRef"].(map[string]interface{}); ok6 {
-					fmt.Fprintf(writer, "    %s%s:\t (%s:%s)\n", indent, envMap["name"], fieldRef["apiVersion"], fieldRef["fieldPath"])
-				} else if resourceFieldRef, ok6 := valueFrom["resourceFieldRef"].(map[string]interface{}); ok6 {
-					fmt.Fprintf(writer, "    %s%s:\t%s (%s)\n", indent, envMap["name"], resourceFieldRef["containerName"], resourceFieldRef["resource"])
-				} else if secretKeyRef, ok6 := valueFrom["secretKeyRef"].(map[string]interface{}); ok6 {
-					optional := false
-					if _, ok7 := secretKeyRef["optional"]; ok7 {
-						optional = secretKeyRef["optional"].(bool)
+			for _, node := range nodeList.Items {
+				if resName == node.Name {
+					s, err :=describeNode(node)
+					if err!=nil{
+						log.Fatalf("Error generating output for node %s: %s", node.Name,err.Error())
 					}
-					fmt.Fprintf(writer, "    %s%s:\t<set to the key '%s' in secret '%s'>\tOptional: %t\n", indent, envMap["name"], secretKeyRef["key"], secretKeyRef["name"], optional)
-				} else if configMapKeyRef, ok6 := valueFrom["configMapKeyRef"].(map[string]interface{}); ok6 {
-					optional := false
-					if _, ok7 := configMapKeyRef["optional"]; ok7 {
-						optional = configMapKeyRef["optional"].(bool)
-					}
-					fmt.Fprintf(writer, "    %s%s:\t<set to the key '%s' of config map '%s'>\tOptional: %t\n", indent, envMap["name"], configMapKeyRef["key"], configMapKeyRef["name"], optional)
-				}
-			} else {
-				for i, s := range strings.Split(envMap["value"].(string), "\n") {
-					if i == 0 {
-						fmt.Fprintf(writer, "    %s%s:\t%s\n", indent, envMap["name"], s)
-					} else {
-						fmt.Fprintf(writer, "    %s\t%s\n", indent, s)
-					}
+					fmt.Println(s)
+					break
 				}
 			}
-		}
-	} else {
-		fmt.Fprintf(writer, "  %sEnvironment:\t<none>\n", indent)
-	}
-}
-
-func describeVolumeMountsWithIndent(writer *tabwriter.Writer, cont map[string]interface{}, indent string) {
-	if volumeMounts, ok4 := cont["volumeMounts"].([]interface{}); ok4 {
-		fmt.Fprintf(writer, "  %sMounts:\n", indent)
-		for _, item4 := range volumeMounts {
-			mount := item4.(map[string]interface{})
-			flags := []string{}
-			if readOnly, ok5 := mount["readOnly"].(bool); ok5 && readOnly {
-				flags = append(flags, "ro")
-			} else {
-				flags = append(flags, "rw")
-			}
-			if subPath, ok5 := mount["subPath"]; ok5 {
-				flags = append(flags, fmt.Sprintf("path=%q", subPath))
-			}
-			fmt.Fprintf(writer, "    %s%s from %s (%s)\n", indent, mount["mountPath"], mount["name"], strings.Join(flags, ","))
-		}
-	} else {
-		fmt.Fprintf(writer, "  %sMounts:\t<none>\n", indent)
-	}
-	if volumeDevices, ok4 := cont["volumeDevices"].([]interface{}); ok4 {
-		fmt.Fprintf(writer, "  %sDevices:\n", indent)
-		for _, item4 := range volumeDevices {
-			device := item4.(map[string]interface{})
-			fmt.Fprintf(writer, "    %s%s from %s\n", indent, device["devicePath"], device["name"])
-		}
-	}
-}
-
-func describeVolumesWithIndent(writer *tabwriter.Writer, items interface{}, indent string) {
-	if volumes, ok1 := items.([]interface{}); ok1 {
-		fmt.Fprintf(writer, "%sVolumes:\n", indent)
-		for _, item1 := range volumes {
-			vol := item1.(map[string]interface{})
-			fmt.Fprintf(writer, "  %s%v:\n", indent, vol["name"])
-			if hostPath, ok2 := vol["hostPath"].(map[string]interface{}); ok2 {
-				fmt.Fprintf(writer, "    %sType:\tHostPath (bare host directory volume)\n", indent)
-				fmt.Fprintf(writer, "    %sPath:\t%s\n", indent, hostPath["path"])
-				if hostPathType, ok3 := hostPath["type"]; ok3 {
-					fmt.Fprintf(writer, "    %sHostPathType:\t%s\n", indent, hostPathType)
+		} else if (resType == "pv" || resType == "persistentvolume") && kind == "PersistentVolumeList" {
+				var pvList corev1.PersistentVolumeList
+				err := json.Unmarshal([]byte(buffer), &pvList)
+				if err != nil {
+					log.Fatalf("Error parsing pv list: %v\n%v\n", err.Error(), buffer)
 				}
-			} else if emptyDir, ok2 := vol["emptyDir"].(map[string]interface{}); ok2 {
-				fmt.Fprintf(writer, "    %sType:\tEmptyDir (a temporary directory that shares a pod's lifetime)\n", indent)
-				var sizeLimitStr string
-				fmt.Fprintf(writer, "    %sMedium:", indent)
-				if medium, ok3 := emptyDir["medium"].(string); ok3 {
-					fmt.Fprintf(writer, "\t%s", medium)
-				}
-				fmt.Fprintf(writer, "\n")
-				if sizeLimit, ok3 := emptyDir["sizeLimit"].(float64); ok3 && sizeLimit > 0 {
-					sizeLimitStr = fmt.Sprintf("%v", sizeLimit)
-				}
-				fmt.Fprintf(writer, "    %sSizeLimit:\t%s\n", indent, sizeLimitStr)
-			} else if secret, ok2 := vol["secret"].(map[string]interface{}); ok2 {
-				optional := false
-				if _, ok3 := secret["optional"]; ok3 {
-					optional = secret["optional"].(bool)
-				}
-				fmt.Fprintf(writer, "    %sType:\tSecret (a volume populated by a Secret)\n", indent)
-				fmt.Fprintf(writer, "    %sSecretName:\t%v\n", indent, secret["secretName"])
-				fmt.Fprintf(writer, "    %sOptional:\t%v\n", indent, optional)
-			} else if configMap, ok2 := vol["configMap"].(map[string]interface{}); ok2 {
-				optional := false
-				if _, ok3 := configMap["optional"]; ok3 {
-					optional = configMap["optional"].(bool)
-				}
-				fmt.Fprintf(writer, "    %sType:\tConfigMap (a volume populated by a ConfigMap)\n", indent)
-				fmt.Fprintf(writer, "    %sName:\t%v\n", indent, configMap["name"])
-				fmt.Fprintf(writer, "    %sOptional:\t%v\n", indent, optional)
-			} else if nfs, ok2 := vol["nfs"].(map[string]interface{}); ok2 {
-				fmt.Fprintf(writer, "    %sType:\tNFS (an NFS mount that lasts the lifetime of a pod)\n", indent)
-				fmt.Fprintf(writer, "    %sServer:\t%v\n", indent, nfs["server"])
-				fmt.Fprintf(writer, "    %sPath:\t%v\n", indent, nfs["path"])
-				readOnly := false
-				if _, ok3 := nfs["readOnly"]; ok3 {
-					readOnly = nfs["readOnly"].(bool)
-				}
-				fmt.Fprintf(writer, "    %sReadOnly:\t%v\n", indent, readOnly)
-			} else if iscsi, ok2 := vol["iscsi"].(map[string]interface{}); ok2 {
-				fmt.Fprintf(writer, "    %sType:\tISCSI (an ISCSI Disk resource that is attached to a kubelet's host machine and then exposed to the pod)\n", indent)
-				fmt.Fprintf(writer, "    %sTargetPortal:\t%v\n", indent, iscsi["portals"])
-				fmt.Fprintf(writer, "    %sIQN:\t%v\n", indent, iscsi["iqn"])
-				fmt.Fprintf(writer, "    %sLun:\t%v\n", indent, iscsi["lun"])
-				fmt.Fprintf(writer, "    %sISCSIInterface:\t%v\n", indent, iscsi["iscsiInterface"])
-				fmt.Fprintf(writer, "    %sFSType:\t%v\n", indent, iscsi["fsType"])
-				fmt.Fprintf(writer, "    %sReadOnly:\t%v\n", indent, iscsi["readOnly"])
-				fmt.Fprintf(writer, "    %sPortals:\t%v\n", indent, iscsi["targetPortal"])
-				fmt.Fprintf(writer, "    %sDiscoveryCHAPAuth:\t%v\n", indent, iscsi["chapAuthDiscovery"])
-				fmt.Fprintf(writer, "    %sSessionCHAPAuth:\t%v\n", indent, iscsi["chapAuthSession"])
-				fmt.Fprintf(writer, "    %sSecretRef:\t%v\n", indent, iscsi["server"])
-				if _, ok3 := iscsi["initiatorName"]; ok3 {
-					fmt.Fprintf(writer, "    %sInitiatorName:\t%v\n", indent, iscsi["initiatorName"])
-				}
-			} else if pvc, ok2 := vol["persistentVolumeClaim"].(map[string]interface{}); ok2 {
-				fmt.Fprintf(writer, "    %sType:\tPersistentVolumeClaim (a reference to a PersistentVolumeClaim in the same namespace)\n", indent)
-				fmt.Fprintf(writer, "    %sClaimName:\t%v\n", indent, pvc["claimName"])
-				fmt.Fprintf(writer, "    %sReadOnly:\t%v\n", indent, pvc["readOnly"])
-				// } else if ephemeral, ok2 := vol["ephemeral"].(map[string]interface{}); ok2 {
-				// 	fmt.Fprintf(writer, "    Type:\tEphemeralVolume (an inline specification for a volume that gets created and deleted with the pod)\n")
-				// 	fmt.Fprintf(writer, "    ClaimName:\t%v\n", pvc["claimName"])
-				// 	fmt.Fprintf(writer, "    ReadOnly:\t%v\n", pvc["readOnly"])
-			} else if rbd, ok2 := vol["rbd"].(map[string]interface{}); ok2 {
-				fmt.Fprintf(writer, "    %sType:\tRBD (a Rados Block Device mount on the host that shares a pod's lifetime)\n", indent)
-				fmt.Fprintf(writer, "    %sCephMonitors:\t%v\n", indent, rbd["monitors"])
-				fmt.Fprintf(writer, "    %sRBDImage:\t%v\n", indent, rbd["image"])
-				fmt.Fprintf(writer, "    %sFSType:\t%v\n", indent, rbd["fsType"])
-				fmt.Fprintf(writer, "    %sRBDPool:\t%v\n", indent, rbd["pool"])
-				fmt.Fprintf(writer, "    %sRadosUser:\t%v\n", indent, rbd["user"])
-				fmt.Fprintf(writer, "    %sKeyring:\t%v\n", indent, rbd["keyring"])
-				fmt.Fprintf(writer, "    %sSecretRef:\t%v\n", indent, rbd["secretRef"])
-				fmt.Fprintf(writer, "    %sReadOnly:\t%v\n", indent, rbd["readOnly"])
-			} else if vsphereVolume, ok2 := vol["vsphereVolume"].(map[string]interface{}); ok2 {
-				fmt.Fprintf(writer, "    %sType:\tvSphereVolume (a Persistent Disk resource in vSphere)\n", indent)
-				fmt.Fprintf(writer, "    %sVolumePath:\t%v\n", indent, vsphereVolume["volumePath"])
-				fmt.Fprintf(writer, "    %sFSType:\t%v\n", indent, vsphereVolume["fsType"])
-				fmt.Fprintf(writer, "    %sStoragePolicyName:\t%v\n", indent, vsphereVolume["storagePolicyName"])
-			} else if cinder, ok2 := vol["cinder"].(map[string]interface{}); ok2 {
-				fmt.Fprintf(writer, "    %sType:\tCinder (a Persistent Disk resource in OpenStack)\n", indent)
-				fmt.Fprintf(writer, "    %sVolumeID:\t%v\n", indent, cinder["volumeID"])
-				fmt.Fprintf(writer, "    %sFSType:\t%v\n", indent, cinder["fsType"])
-				fmt.Fprintf(writer, "    %sReadOnly:\t%v\n", indent, cinder["readOnly"])
-				fmt.Fprintf(writer, "    %sSecretRef:\t%v\n", indent, cinder["secretRef"])
-			} else if cephfs, ok2 := vol["cephfs"].(map[string]interface{}); ok2 {
-				fmt.Fprintf(writer, "    %sType:\tCephFS (a CephFS mount on the host that shares a pod's lifetime)\n", indent)
-				fmt.Fprintf(writer, "    %sMonitors:\t%v\n", indent, cephfs["monitors"])
-				fmt.Fprintf(writer, "    %sPath:\t%v\n", indent, cephfs["path"])
-				fmt.Fprintf(writer, "    %sUser:\t%v\n", indent, cephfs["user"])
-				fmt.Fprintf(writer, "    %sSecretFile:\t%v\n", indent, cephfs["secretFile"])
-				fmt.Fprintf(writer, "    %sSecretRef:\t%v\n", indent, cephfs["secretRef"])
-				fmt.Fprintf(writer, "    %sReadOnly:\t%v\n", indent, cephfs["readOnly"])
-			} else if projected, ok2 := vol["projected"].(map[string]interface{}); ok2 {
-				fmt.Fprintf(writer, "    %sType:\tProjected (a volume that contains injected data from multiple sources)\n", indent)
-				sources := projected["sources"].([]interface{})
-				for _, item2 := range sources {
-					source := item2.(map[string]interface{})
-					if pSecret, ok3 := source["secret"].(map[string]interface{}); ok3 {
-						fmt.Fprintf(writer, "    %sSecretName:\t%v\n", indent, pSecret["name"])
-						fmt.Fprintf(writer, "    %sSecretOptionalName:\t%v\n", indent, pSecret["optional"])
-					} else if _, ok3 := source["downwardAPI"]; ok3 {
-						fmt.Fprintf(writer, "    %sDownwardAPI:\ttrue\n", indent)
-					} else if pConfigMap, ok3 := source["configMap"].(map[string]interface{}); ok3 {
-						fmt.Fprintf(writer, "    %sConfigMapName:\t%v\n", indent, pConfigMap["name"])
-						fmt.Fprintf(writer, "    %sConfigMapOptional:\t%v\n", indent, pConfigMap["optional"])
-					} else if pServiceAccountToken, ok3 := source["serviceAccountToken"].(map[string]interface{}); ok3 {
-						fmt.Fprintf(writer, "    %sTokenExpirationSeconds:\t%v\n", indent, pServiceAccountToken["expirationSeconds"])
-					}
-				}
-				// } else if csi, ok2 := vol["csi"].(map[string]interface{}); ok2 {
-				// 	fmt.Fprintf(writer, "    Type:\tCSI (a Container Storage Interface (CSI) volume source)\n")
-				// 	fmt.Fprintf(writer, "    ReadOnly:\t%v\n", cephfs["readOnly"])
-				// 	fmt.Fprintf(writer, "    ReadOnly:\t%v\n", cephfs["readOnly"])
-				// 	fmt.Fprintf(writer, "    ReadOnly:\t%v\n", cephfs["readOnly"])
-			} else {
-				fmt.Fprintf(writer, "    %s<unknown>\n", indent)
-			}
-		}
-	} else {
-		fmt.Fprintf(writer, "%sVolumes:\t<none>\n", indent)
-	}
-}
-
-func describeSelector(writer *tabwriter.Writer, selectors interface{}, displayName string) {
-	if selectors != nil {
-		selectorMap := selectors.(map[string]interface{})
-		idx := 0
-		for k, v := range selectorMap {
-			if idx == 0 {
-				fmt.Fprintf(writer, "%s:\t%s=%s", displayName, k, v)
-			} else {
-				fmt.Fprintf(writer, ",%s=%s", k, v)
-			}
-			idx++
-		}
-		fmt.Fprintf(writer, "\n")
-	}
-}
-
-func describePodTemplate(writer *tabwriter.Writer, template map[string]interface{}) {
-	templateMetadata := template["metadata"].(map[string]interface{})
-	fmt.Fprintf(writer, "Pod Template:\n")
-	describeLabelsWithIndent(writer, templateMetadata["labels"], "  ")
-	describeAnnotationsWithIndent(writer, templateMetadata["annotations"], "  ")
-	templateSpec := template["spec"].(map[string]interface{})
-	if serviceAccount, ok := templateSpec["serviceAccount"]; ok {
-		fmt.Fprintf(writer, "  Service Account:\t%s\n", serviceAccount)
-	}
-	if initContainers, ok := templateSpec["initContainers"].([]interface{}); ok {
-		fmt.Fprintf(writer, "  Init Containers:\n")
-		for _, cont := range initContainers {
-			describeContainer(writer, cont.(map[string]interface{}), "    ")
-		}
-	}
-	fmt.Fprintf(writer, "  Containers:\n")
-	for _, cont := range templateSpec["containers"].([]interface{}) {
-		describeContainer(writer, cont.(map[string]interface{}), "    ")
-	}
-	describeVolumesWithIndent(writer, templateSpec["volumes"], "  ")
-	describeTopologySpreadConstraints(writer, templateSpec["topologySpreadConstraints"], "  ")
-	if priorityClassName, ok := templateSpec["priorityClassName"]; ok {
-		fmt.Fprintf(writer, "  Priority Class Name:\t%s\n", priorityClassName)
-	}
-}
-
-func describeContainer(writer *tabwriter.Writer, cont map[string]interface{}, indent string) {
-	describeContainerBasicInfoWithIndent(writer, cont, nil, false, indent)
-	describeContainerCommandWithIndent(writer, cont, indent)
-	describeContainerResourcesWithIndent(writer, cont, indent)
-	describeContainerProbeWithIndent(writer, cont, indent)
-	describeEnvFromWithIndent(writer, cont, indent)
-	describeEnvVarsWithIndent(writer, cont, indent)
-	describeVolumeMountsWithIndent(writer, cont, indent)
-}
-
-func describeConditions(writer *tabwriter.Writer, items interface{}) {
-	if conditions, ok := items.([]interface{}); ok {
-		fmt.Fprintf(writer, "Conditions:\n  Type\tStatus\tReason\n")
-		fmt.Fprintf(writer, "  ----\t------\t------\n")
-		for _, cond := range conditions {
-			condMap := cond.(map[string]interface{})
-			fmt.Fprintf(writer, "  %v \t%v\t%v\n", condMap["type"], condMap["status"], condMap["reason"])
-		}
-	}
-}
-
-func describeTopologySpreadConstraints(writer *tabwriter.Writer, items interface{}, indent string) {
-	if tscs, ok := items.([]interface{}); ok {
-		sort.Slice(tscs, func(i, j int) bool {
-			tscs1 := tscs[i].(map[string]interface{})
-			tscs2 := tscs[j].(map[string]interface{})
-			key1, _ := strconv.ParseInt(tscs1["topologyKey"].(string), 10, 0)
-			key2, _ := strconv.ParseInt(tscs2["topologyKey"].(string), 10, 0)
-			return key1 < key2
-		})
-		fmt.Fprintf(writer, "%sTopology Spread Constraints:\t", indent)
-		for i, item := range tscs {
-			if i != 0 {
-				fmt.Fprintf(writer, "%s", indent)
-				fmt.Fprintf(writer, "%s", "\t")
-			}
-			tsc := item.(map[string]interface{})
-			fmt.Fprintf(writer, "%s:", tsc["topologyKey"])
-			fmt.Fprintf(writer, "%v", tsc["whenUnsatisfiable"])
-			fmt.Fprintf(writer, " when max skew %v is exceeded", tsc["maxSkew"])
-			if labelSelector, ok1 := tsc["labelSelector"].(map[string]interface{}); ok1 {
-				if selectorMap, ok2 := labelSelector["matchLabels"].(map[string]interface{}); ok2 {
-					idx := 0
-					for k, v := range selectorMap {
-						if idx == 0 {
-							fmt.Fprintf(writer, " for selector %s=%s", k, v)
-						} else {
-							fmt.Fprintf(writer, ",%s=%s", k, v)
+				for _, pv := range pvList.Items {
+					if resName == pv.Name {
+						s, err :=describePersistentVolume(&pv)
+						if err!=nil{
+							log.Fatalf("Error generating output for pv %s: %s", pv.Name,err.Error())
 						}
-						idx++
+						fmt.Println(s)
+						break
 					}
 				}
+		} else if (resType == "po" || resType == "pod") && kind == "PodList"{
+			var podList corev1.PodList
+			err := json.Unmarshal([]byte(buffer), &podList)
+			if err != nil {
+				log.Fatalf("Error parsing pod list: %v\n%v\n", err.Error(), buffer)
 			}
-			fmt.Fprintf(writer, "\n")
+			for _, pod := range podList.Items {
+				if resName == pod.Name && resNamespace==pod.Namespace {
+					s, err := describePod(&pod)
+					if err!=nil{
+						log.Fatalf("Error generating output for pod %s/%s: %s", pod.Namespace,pod.Name,err.Error())
+					}
+					fmt.Println(s)
+					break
+				}
+			}
+		} else if (resType == "svc" || resType == "service") && kind == "ServiceList" {
+			var svcList corev1.ServiceList
+			err := json.Unmarshal([]byte(buffer), &svcList)
+			if err != nil {
+				log.Fatalf("Error parsing service list: %v\n%v\n", err.Error(), buffer)
+			}
+			for _, svc := range svcList.Items {
+				if resName == svc.Name && resNamespace == svc.Namespace {
+					s, err := describeService(&svc)
+					if err!=nil{
+						log.Fatalf("Error generating output for service %s/%s: %s", svc.Namespace,svc.Name,err.Error())
+					}
+					fmt.Println(s)
+					break
+				}
+			}
+		} else if (resType == "deploy" || resType == "deployment") && kind == "DeploymentList" {
+			var deployList appsv1.DeploymentList
+			err := json.Unmarshal([]byte(buffer), &deployList)
+			if err != nil {
+				log.Fatalf("Error parsing deployment list: %v\n%v\n", err.Error(), buffer)
+			}
+			for _, deploy := range deployList.Items {
+				if resName == deploy.Name && resNamespace == deploy.Namespace {
+					s, err := describeDeployment(&deploy)
+					if err!=nil{
+						log.Fatalf("Error generating output for deployment %s/%s: %s", deploy.Namespace,deploy.Name,err.Error())
+					}
+					fmt.Println(s)
+					break
+				}
+			}			
+		} else if (resType == "ds" || resType == "daemonset") &&  kind == "DaemonSetList" {
+			var daemonList appsv1.DaemonSetList
+			err := json.Unmarshal([]byte(buffer), &daemonList)
+			if err != nil {
+				log.Fatalf("Error parsing daemonset list: %v\n%v\n", err.Error(), buffer)
+			}
+			for _, daemon := range daemonList.Items {
+				if resName == daemon.Name && resNamespace == daemon.Namespace {
+					s, err := describeDaemonSet(&daemon)
+					if err!=nil{
+						log.Fatalf("Error generating output for daemonset %s/%s: %s", daemon.Namespace,daemon.Name,err.Error())
+					}
+					fmt.Println(s)
+					break
+				}
+			}			
+		} else if (resType == "rs" || resType == "replicaset") && kind== "ReplicaSetList" {
+			var replicaList appsv1.ReplicaSetList
+			err := json.Unmarshal([]byte(buffer), &replicaList)
+			if err != nil {
+				log.Fatalf("Error parsing replicaset list: %v\n%v\n", err.Error(), buffer)
+			}
+			for _, rs := range replicaList.Items {
+				if resName == rs.Name && resNamespace == rs.Namespace {
+					s, err := describeReplicaSet(&rs)
+					if err!=nil{
+						log.Fatalf("Error generating output for replicaset %s/%s: %s", rs.Namespace,rs.Name,err.Error())
+					}
+					fmt.Println(s)
+					break
+				}
+			}			
+		} else if (resType == "pvc" || resType == "persistentvolumeclaim") && kind== "PersistentVolumeClaimList" {
+				var pvcList corev1.PersistentVolumeClaimList
+				err := json.Unmarshal([]byte(buffer), &pvcList)
+				if err != nil {
+					log.Fatalf("Error parsing pvc list: %v\n%v\n", err.Error(), buffer)
+				}
+				for _, pvc := range pvcList.Items {
+					if resName == pvc.Name && resNamespace == pvc.Namespace {
+						s, err := describePersistentVolumeClaim(&pvc)
+						if err!=nil{
+							log.Fatalf("Error generating output for pvc %s/%s: %s", pvc.Namespace,pvc.Name,err.Error())
+						}
+						fmt.Println(s)
+						break
+					}
+				}			
+			}
+
+	}
+}
+
+func describePersistentVolume(pv *corev1.PersistentVolume) (string, error) {
+	return tabbedString(func(out io.Writer) error {
+		w := NewPrefixWriter(out)
+		w.Write(LEVEL_0, "Name:\t%s\n", pv.Name)
+		printLabelsMultiline(w, "Labels", pv.ObjectMeta.Labels)
+		printAnnotationsMultiline(w, "Annotations", pv.ObjectMeta.Annotations)
+		w.Write(LEVEL_0, "Finalizers:\t%v\n", pv.ObjectMeta.Finalizers)
+		w.Write(LEVEL_0, "StorageClass:\t%s\n", storageutil.GetPersistentVolumeClass(pv))
+		if pv.ObjectMeta.DeletionTimestamp != nil {
+			w.Write(LEVEL_0, "Status:\tTerminating (lasts %s)\n", translateTimestampSince(*pv.ObjectMeta.DeletionTimestamp))
+		} else {
+			w.Write(LEVEL_0, "Status:\t%v\n", pv.Status.Phase)
+		}
+		if pv.Spec.ClaimRef != nil {
+			w.Write(LEVEL_0, "Claim:\t%s\n", pv.Spec.ClaimRef.Namespace+"/"+pv.Spec.ClaimRef.Name)
+		} else {
+			w.Write(LEVEL_0, "Claim:\t%s\n", "")
+		}
+		w.Write(LEVEL_0, "Reclaim Policy:\t%v\n", pv.Spec.PersistentVolumeReclaimPolicy)
+		w.Write(LEVEL_0, "Access Modes:\t%s\n", storageutil.GetAccessModesAsString(pv.Spec.AccessModes))
+		if pv.Spec.VolumeMode != nil {
+			w.Write(LEVEL_0, "VolumeMode:\t%v\n", *pv.Spec.VolumeMode)
+		}
+		storage := pv.Spec.Capacity[corev1.ResourceStorage]
+		w.Write(LEVEL_0, "Capacity:\t%s\n", storage.String())
+		printVolumeNodeAffinity(w, pv.Spec.NodeAffinity)
+		w.Write(LEVEL_0, "Message:\t%s\n", pv.Status.Message)
+		w.Write(LEVEL_0, "Source:\n")
+
+		switch {
+		case pv.Spec.HostPath != nil:
+			printHostPathVolumeSource(pv.Spec.HostPath, w)
+		case pv.Spec.GCEPersistentDisk != nil:
+			printGCEPersistentDiskVolumeSource(pv.Spec.GCEPersistentDisk, w)
+		case pv.Spec.AWSElasticBlockStore != nil:
+			printAWSElasticBlockStoreVolumeSource(pv.Spec.AWSElasticBlockStore, w)
+		case pv.Spec.NFS != nil:
+			printNFSVolumeSource(pv.Spec.NFS, w)
+		case pv.Spec.ISCSI != nil:
+			printISCSIPersistentVolumeSource(pv.Spec.ISCSI, w)
+		case pv.Spec.Glusterfs != nil:
+			printGlusterfsPersistentVolumeSource(pv.Spec.Glusterfs, w)
+		case pv.Spec.RBD != nil:
+			printRBDPersistentVolumeSource(pv.Spec.RBD, w)
+		case pv.Spec.Quobyte != nil:
+			printQuobyteVolumeSource(pv.Spec.Quobyte, w)
+		case pv.Spec.VsphereVolume != nil:
+			printVsphereVolumeSource(pv.Spec.VsphereVolume, w)
+		case pv.Spec.Cinder != nil:
+			printCinderPersistentVolumeSource(pv.Spec.Cinder, w)
+		case pv.Spec.AzureDisk != nil:
+			printAzureDiskVolumeSource(pv.Spec.AzureDisk, w)
+		case pv.Spec.PhotonPersistentDisk != nil:
+			printPhotonPersistentDiskVolumeSource(pv.Spec.PhotonPersistentDisk, w)
+		case pv.Spec.PortworxVolume != nil:
+			printPortworxVolumeSource(pv.Spec.PortworxVolume, w)
+		case pv.Spec.ScaleIO != nil:
+			printScaleIOPersistentVolumeSource(pv.Spec.ScaleIO, w)
+		case pv.Spec.Local != nil:
+			printLocalVolumeSource(pv.Spec.Local, w)
+		case pv.Spec.CephFS != nil:
+			printCephFSPersistentVolumeSource(pv.Spec.CephFS, w)
+		case pv.Spec.StorageOS != nil:
+			printStorageOSPersistentVolumeSource(pv.Spec.StorageOS, w)
+		case pv.Spec.FC != nil:
+			printFCVolumeSource(pv.Spec.FC, w)
+		case pv.Spec.AzureFile != nil:
+			printAzureFilePersistentVolumeSource(pv.Spec.AzureFile, w)
+		case pv.Spec.FlexVolume != nil:
+			printFlexPersistentVolumeSource(pv.Spec.FlexVolume, w)
+		case pv.Spec.Flocker != nil:
+			printFlockerVolumeSource(pv.Spec.Flocker, w)
+		case pv.Spec.CSI != nil:
+			printCSIPersistentVolumeSource(pv.Spec.CSI, w)
+		default:
+			w.Write(LEVEL_1, "<unknown>\n")
+		}
+
+		return nil
+	})
+}
+
+func printVolumeNodeAffinity(w PrefixWriter, affinity *corev1.VolumeNodeAffinity) {
+	w.Write(LEVEL_0, "Node Affinity:\t")
+	if affinity == nil || affinity.Required == nil {
+		w.WriteLine("<none>")
+		return
+	}
+	w.WriteLine("")
+
+	if affinity.Required != nil {
+		w.Write(LEVEL_1, "Required Terms:\t")
+		if len(affinity.Required.NodeSelectorTerms) == 0 {
+			w.WriteLine("<none>")
+		} else {
+			w.WriteLine("")
+			for i, term := range affinity.Required.NodeSelectorTerms {
+				printNodeSelectorTermsMultilineWithIndent(w, LEVEL_2, fmt.Sprintf("Term %v", i), "\t", term.MatchExpressions)
+			}
 		}
 	}
+}
+
+// printLabelsMultiline prints multiple labels with a user-defined alignment.
+func printNodeSelectorTermsMultilineWithIndent(w PrefixWriter, indentLevel int, title, innerIndent string, reqs []corev1.NodeSelectorRequirement) {
+	w.Write(indentLevel, "%s:%s", title, innerIndent)
+
+	if len(reqs) == 0 {
+		w.WriteLine("<none>")
+		return
+	}
+
+	for i, req := range reqs {
+		if i != 0 {
+			w.Write(indentLevel, "%s", innerIndent)
+		}
+		exprStr := fmt.Sprintf("%s %s", req.Key, strings.ToLower(string(req.Operator)))
+		if len(req.Values) > 0 {
+			exprStr = fmt.Sprintf("%s [%s]", exprStr, strings.Join(req.Values, ", "))
+		}
+		w.Write(LEVEL_0, "%s\n", exprStr)
+	}
+}
+
+func describePersistentVolumeClaim(pvc *corev1.PersistentVolumeClaim) (string, error) {
+	return tabbedString(func(out io.Writer) error {
+		w := NewPrefixWriter(out)
+		printPersistentVolumeClaim(w, pvc, true)
+		// printPodsMultiline(w, "Used By", pods)
+
+		if len(pvc.Status.Conditions) > 0 {
+			w.Write(LEVEL_0, "Conditions:\n")
+			w.Write(LEVEL_1, "Type\tStatus\tLastProbeTime\tLastTransitionTime\tReason\tMessage\n")
+			w.Write(LEVEL_1, "----\t------\t-----------------\t------------------\t------\t-------\n")
+			for _, c := range pvc.Status.Conditions {
+				w.Write(LEVEL_1, "%v \t%v \t%s \t%s \t%v \t%v\n",
+					c.Type,
+					c.Status,
+					c.LastProbeTime.Time.Format(time.RFC1123Z),
+					c.LastTransitionTime.Time.Format(time.RFC1123Z),
+					c.Reason,
+					c.Message)
+			}
+		}
+
+		return nil
+	})
+}
+
+func describeNode(node corev1.Node) (string, error) {
+	return tabbedString(func(out io.Writer) error {
+		w := NewPrefixWriter(out)
+		w.Write(LEVEL_0, "Name:\t%s\n", node.Name)
+		if roles := findNodeRoles(node); len(roles) > 0 {
+			w.Write(LEVEL_0, "Roles:\t%s\n", strings.Join(roles, ","))
+		} else {
+			w.Write(LEVEL_0, "Roles:\t%s\n", "<none>")
+		}
+		printLabelsMultiline(w, "Labels", node.Labels)
+		printAnnotationsMultiline(w, "Annotations", node.Annotations)
+		w.Write(LEVEL_0, "CreationTimestamp:\t%s\n", node.CreationTimestamp.Time.Format(time.RFC1123Z))
+		printNodeTaintsMultiline(w, "Taints", node.Spec.Taints)
+		w.Write(LEVEL_0, "Unschedulable:\t%v\n", node.Spec.Unschedulable)
+
+		if len(node.Status.Conditions) > 0 {
+			w.Write(LEVEL_0, "Conditions:\n  Type\tStatus\tLastHeartbeatTime\tLastTransitionTime\tReason\tMessage\n")
+			w.Write(LEVEL_1, "----\t------\t-----------------\t------------------\t------\t-------\n")
+			for _, c := range node.Status.Conditions {
+				w.Write(LEVEL_1, "%v \t%v \t%s \t%s \t%v \t%v\n",
+					c.Type,
+					c.Status,
+					c.LastHeartbeatTime.Time.Format(time.RFC1123Z),
+					c.LastTransitionTime.Time.Format(time.RFC1123Z),
+					c.Reason,
+					c.Message)
+			}
+		}
+
+		w.Write(LEVEL_0, "Addresses:\n")
+		for _, address := range node.Status.Addresses {
+			w.Write(LEVEL_1, "%s:\t%s\n", address.Type, address.Address)
+		}
+
+		printResourceList := func(resourceList corev1.ResourceList) {
+			resources := make([]corev1.ResourceName, 0, len(resourceList))
+			for resource := range resourceList {
+				resources = append(resources, resource)
+			}
+			sort.Sort(SortableResourceNames(resources))
+			for _, resource := range resources {
+				value := resourceList[resource]
+				w.Write(LEVEL_0, "  %s:\t%s\n", resource, value.String())
+			}
+		}
+
+		if len(node.Status.Capacity) > 0 {
+			w.Write(LEVEL_0, "Capacity:\n")
+			printResourceList(node.Status.Capacity)
+		}
+		if len(node.Status.Allocatable) > 0 {
+			w.Write(LEVEL_0, "Allocatable:\n")
+			printResourceList(node.Status.Allocatable)
+		}
+
+		w.Write(LEVEL_0, "System Info:\n")
+		w.Write(LEVEL_0, "  Machine ID:\t%s\n", node.Status.NodeInfo.MachineID)
+		w.Write(LEVEL_0, "  System UUID:\t%s\n", node.Status.NodeInfo.SystemUUID)
+		w.Write(LEVEL_0, "  Boot ID:\t%s\n", node.Status.NodeInfo.BootID)
+		w.Write(LEVEL_0, "  Kernel Version:\t%s\n", node.Status.NodeInfo.KernelVersion)
+		w.Write(LEVEL_0, "  OS Image:\t%s\n", node.Status.NodeInfo.OSImage)
+		w.Write(LEVEL_0, "  Operating System:\t%s\n", node.Status.NodeInfo.OperatingSystem)
+		w.Write(LEVEL_0, "  Architecture:\t%s\n", node.Status.NodeInfo.Architecture)
+		w.Write(LEVEL_0, "  Container Runtime Version:\t%s\n", node.Status.NodeInfo.ContainerRuntimeVersion)
+		w.Write(LEVEL_0, "  Kubelet Version:\t%s\n", node.Status.NodeInfo.KubeletVersion)
+		w.Write(LEVEL_0, "  Kube-Proxy Version:\t%s\n", node.Status.NodeInfo.KubeProxyVersion)
+
+		// remove when .PodCIDR is depreciated
+		if len(node.Spec.PodCIDR) > 0 {
+			w.Write(LEVEL_0, "PodCIDR:\t%s\n", node.Spec.PodCIDR)
+		}
+
+		if len(node.Spec.PodCIDRs) > 0 {
+			w.Write(LEVEL_0, "PodCIDRs:\t%s\n", strings.Join(node.Spec.PodCIDRs, ","))
+		}
+		if len(node.Spec.ProviderID) > 0 {
+			w.Write(LEVEL_0, "ProviderID:\t%s\n", node.Spec.ProviderID)
+		}
+
+		return nil
+	})
+}
+
+// findNodeRoles returns the roles of a given node.
+// The roles are determined by looking for:
+// * a node-role.kubernetes.io/<role>="" label
+// * a kubernetes.io/role="<role>" label
+func findNodeRoles(node corev1.Node) []string {
+	roles := sets.NewString()
+	for k, v := range node.Labels {
+		switch {
+		case strings.HasPrefix(k, LabelNodeRolePrefix):
+			if role := strings.TrimPrefix(k, LabelNodeRolePrefix); len(role) > 0 {
+				roles.Insert(role)
+			}
+
+		case k == NodeLabelRole && v != "":
+			roles.Insert(v)
+		}
+	}
+	return roles.List()
+}
+
+// printLabelsMultiline prints multiple labels with a proper alignment.
+func printLabelsMultiline(w PrefixWriter, title string, labels map[string]string) {
+	printLabelsMultilineWithIndent(w, "", title, "\t", labels, sets.NewString())
+}
+
+// printLabelsMultiline prints multiple labels with a user-defined alignment.
+func printLabelsMultilineWithIndent(w PrefixWriter, initialIndent, title, innerIndent string, labels map[string]string, skip sets.String) {
+	w.Write(LEVEL_0, "%s%s:%s", initialIndent, title, innerIndent)
+
+	if len(labels) == 0 {
+		w.WriteLine("<none>")
+		return
+	}
+
+	// to print labels in the sorted order
+	keys := make([]string, 0, len(labels))
+	for key := range labels {
+		if skip.Has(key) {
+			continue
+		}
+		keys = append(keys, key)
+	}
+	if len(keys) == 0 {
+		w.WriteLine("<none>")
+		return
+	}
+	sort.Strings(keys)
+
+	for i, key := range keys {
+		if i != 0 {
+			w.Write(LEVEL_0, "%s", initialIndent)
+			w.Write(LEVEL_0, "%s", innerIndent)
+		}
+		w.Write(LEVEL_0, "%s=%s\n", key, labels[key])
+	}
+}
+
+// printAnnotationsMultiline prints multiple annotations with a proper alignment.
+// If annotation string is too long, we omit chars more than 200 length.
+func printAnnotationsMultiline(w PrefixWriter, title string, annotations map[string]string) {
+	w.Write(LEVEL_0, "%s:\t", title)
+
+	// to print labels in the sorted order
+	keys := make([]string, 0, len(annotations))
+	for key := range annotations {
+		if skipAnnotations.Has(key) {
+			continue
+		}
+		keys = append(keys, key)
+	}
+	if len(keys) == 0 {
+		w.WriteLine("<none>")
+		return
+	}
+	sort.Strings(keys)
+	indent := "\t"
+	for i, key := range keys {
+		if i != 0 {
+			w.Write(LEVEL_0, indent)
+		}
+		value := strings.TrimSuffix(annotations[key], "\n")
+		if (len(value)+len(key)+2) > maxAnnotationLen || strings.Contains(value, "\n") {
+			w.Write(LEVEL_0, "%s:\n", key)
+			for _, s := range strings.Split(value, "\n") {
+				w.Write(LEVEL_0, "%s  %s\n", indent, shorten(s, maxAnnotationLen-2))
+			}
+		} else {
+			w.Write(LEVEL_0, "%s: %s\n", key, value)
+		}
+	}
+}
+
+func shorten(s string, maxLength int) string {
+	if len(s) > maxLength {
+		return s[:maxLength] + "..."
+	}
+	return s
+}
+
+// printTaintsMultiline prints multiple taints with a proper alignment.
+func printNodeTaintsMultiline(w PrefixWriter, title string, taints []corev1.Taint) {
+	printTaintsMultilineWithIndent(w, "", title, "\t", taints)
+}
+
+// printTaintsMultilineWithIndent prints multiple taints with a user-defined alignment.
+func printTaintsMultilineWithIndent(w PrefixWriter, initialIndent, title, innerIndent string, taints []corev1.Taint) {
+	w.Write(LEVEL_0, "%s%s:%s", initialIndent, title, innerIndent)
+
+	if len(taints) == 0 {
+		w.WriteLine("<none>")
+		return
+	}
+
+	// to print taints in the sorted order
+	sort.Slice(taints, func(i, j int) bool {
+		cmpKey := func(taint corev1.Taint) string {
+			return string(taint.Effect) + "," + taint.Key
+		}
+		return cmpKey(taints[i]) < cmpKey(taints[j])
+	})
+
+	for i, taint := range taints {
+		if i != 0 {
+			w.Write(LEVEL_0, "%s", initialIndent)
+			w.Write(LEVEL_0, "%s", innerIndent)
+		}
+		w.Write(LEVEL_0, "%s\n", taint.ToString())
+	}
+}
+
+func describePod(pod *corev1.Pod) (string, error) {
+	return tabbedString(func(out io.Writer) error {
+		w := NewPrefixWriter(out)
+		w.Write(LEVEL_0, "Name:\t%s\n", pod.Name)
+		w.Write(LEVEL_0, "Namespace:\t%s\n", pod.Namespace)
+		if pod.Spec.Priority != nil {
+			w.Write(LEVEL_0, "Priority:\t%d\n", *pod.Spec.Priority)
+		}
+		if len(pod.Spec.PriorityClassName) > 0 {
+			w.Write(LEVEL_0, "Priority Class Name:\t%s\n", pod.Spec.PriorityClassName)
+		}
+		if pod.Spec.RuntimeClassName != nil && len(*pod.Spec.RuntimeClassName) > 0 {
+			w.Write(LEVEL_0, "Runtime Class Name:\t%s\n", *pod.Spec.RuntimeClassName)
+		}
+		if len(pod.Spec.ServiceAccountName) > 0 {
+			w.Write(LEVEL_0, "Service Account:\t%s\n", pod.Spec.ServiceAccountName)
+		}
+		if pod.Spec.NodeName == "" {
+			w.Write(LEVEL_0, "Node:\t<none>\n")
+		} else {
+			w.Write(LEVEL_0, "Node:\t%s\n", pod.Spec.NodeName+"/"+pod.Status.HostIP)
+		}
+		if pod.Status.StartTime != nil {
+			w.Write(LEVEL_0, "Start Time:\t%s\n", pod.Status.StartTime.Time.Format(time.RFC1123Z))
+		}
+		printLabelsMultiline(w, "Labels", pod.Labels)
+		printAnnotationsMultiline(w, "Annotations", pod.Annotations)
+		if pod.DeletionTimestamp != nil {
+			w.Write(LEVEL_0, "Status:\tTerminating (lasts %s)\n", translateTimestampSince(*pod.DeletionTimestamp))
+			w.Write(LEVEL_0, "Termination Grace Period:\t%ds\n", *pod.DeletionGracePeriodSeconds)
+		} else {
+			w.Write(LEVEL_0, "Status:\t%s\n", string(pod.Status.Phase))
+		}
+		if len(pod.Status.Reason) > 0 {
+			w.Write(LEVEL_0, "Reason:\t%s\n", pod.Status.Reason)
+		}
+		if len(pod.Status.Message) > 0 {
+			w.Write(LEVEL_0, "Message:\t%s\n", pod.Status.Message)
+		}
+		if pod.Spec.SecurityContext != nil && pod.Spec.SecurityContext.SeccompProfile != nil {
+			w.Write(LEVEL_0, "SeccompProfile:\t%s\n", pod.Spec.SecurityContext.SeccompProfile.Type)
+			if pod.Spec.SecurityContext.SeccompProfile.Type == corev1.SeccompProfileTypeLocalhost {
+				w.Write(LEVEL_0, "LocalhostProfile:\t%s\n", *pod.Spec.SecurityContext.SeccompProfile.LocalhostProfile)
+			}
+		}
+		// remove when .IP field is depreciated
+		w.Write(LEVEL_0, "IP:\t%s\n", pod.Status.PodIP)
+		describePodIPs(pod, w, "")
+		if controlledBy := printController(pod); len(controlledBy) > 0 {
+			w.Write(LEVEL_0, "Controlled By:\t%s\n", controlledBy)
+		}
+		if len(pod.Status.NominatedNodeName) > 0 {
+			w.Write(LEVEL_0, "NominatedNodeName:\t%s\n", pod.Status.NominatedNodeName)
+		}
+
+		if len(pod.Spec.InitContainers) > 0 {
+			describeContainers("Init Containers", pod.Spec.InitContainers, pod.Status.InitContainerStatuses, EnvValueRetriever(pod), w, "")
+		}
+		describeContainers("Containers", pod.Spec.Containers, pod.Status.ContainerStatuses, EnvValueRetriever(pod), w, "")
+		if len(pod.Spec.EphemeralContainers) > 0 {
+			var ec []corev1.Container
+			for i := range pod.Spec.EphemeralContainers {
+				ec = append(ec, corev1.Container(pod.Spec.EphemeralContainers[i].EphemeralContainerCommon))
+			}
+			describeContainers("Ephemeral Containers", ec, pod.Status.EphemeralContainerStatuses, EnvValueRetriever(pod), w, "")
+		}
+		if len(pod.Spec.ReadinessGates) > 0 {
+			w.Write(LEVEL_0, "Readiness Gates:\n  Type\tStatus\n")
+			for _, g := range pod.Spec.ReadinessGates {
+				status := "<none>"
+				for _, c := range pod.Status.Conditions {
+					if c.Type == g.ConditionType {
+						status = fmt.Sprintf("%v", c.Status)
+						break
+					}
+				}
+				w.Write(LEVEL_1, "%v \t%v \n",
+					g.ConditionType,
+					status)
+			}
+		}
+		if len(pod.Status.Conditions) > 0 {
+			w.Write(LEVEL_0, "Conditions:\n  Type\tStatus\n")
+			for _, c := range pod.Status.Conditions {
+				w.Write(LEVEL_1, "%v \t%v \n",
+					c.Type,
+					c.Status)
+			}
+		}
+		describeVolumes(pod.Spec.Volumes, w, "")
+		if pod.Status.QOSClass != "" {
+			w.Write(LEVEL_0, "QoS Class:\t%s\n", pod.Status.QOSClass)
+		} else {
+			w.Write(LEVEL_0, "QoS Class:\t%s\n", qos.GetPodQOS(pod))
+		}
+		printLabelsMultiline(w, "Node-Selectors", pod.Spec.NodeSelector)
+		printPodTolerationsMultiline(w, "Tolerations", pod.Spec.Tolerations)
+		describeTopologySpreadConstraints(pod.Spec.TopologySpreadConstraints, w, "")
+		return nil
+	})
+}
+
+// translateTimestampSince returns the elapsed time since timestamp in
+// human-readable approximation.
+func translateTimestampSince(timestamp metav1.Time) string {
+	if timestamp.IsZero() {
+		return "<unknown>"
+	}
+
+	return duration.HumanDuration(time.Since(timestamp.Time))
+}
+
+func describePodIPs(pod *corev1.Pod, w PrefixWriter, space string) {
+	if len(pod.Status.PodIPs) == 0 {
+		w.Write(LEVEL_0, "%sIPs:\t<none>\n", space)
+		return
+	}
+	w.Write(LEVEL_0, "%sIPs:\n", space)
+	for _, ipInfo := range pod.Status.PodIPs {
+		w.Write(LEVEL_1, "IP:\t%s\n", ipInfo.IP)
+	}
+}
+
+func printController(controllee metav1.Object) string {
+	if controllerRef := metav1.GetControllerOf(controllee); controllerRef != nil {
+		return fmt.Sprintf("%s/%s", controllerRef.Kind, controllerRef.Name)
+	}
+	return ""
+}
+
+func describeContainers(label string, containers []corev1.Container, containerStatuses []corev1.ContainerStatus,
+	resolverFn EnvVarResolverFunc, w PrefixWriter, space string) {
+	statuses := map[string]corev1.ContainerStatus{}
+	for _, status := range containerStatuses {
+		statuses[status.Name] = status
+	}
+
+	describeContainersLabel(containers, label, space, w)
+
+	for _, container := range containers {
+		status, ok := statuses[container.Name]
+		describeContainerBasicInfo(container, status, ok, space, w)
+		describeContainerCommand(container, w)
+		if ok {
+			describeContainerState(status, w)
+		}
+		describeContainerResource(container, w)
+		describeContainerProbe(container, w)
+		if len(container.EnvFrom) > 0 {
+			describeContainerEnvFrom(container, resolverFn, w)
+		}
+		describeContainerEnvVars(container, resolverFn, w)
+		describeContainerVolumes(container, w)
+	}
+}
+
+func describeContainersLabel(containers []corev1.Container, label, space string, w PrefixWriter) {
+	none := ""
+	if len(containers) == 0 {
+		none = " <none>"
+	}
+	w.Write(LEVEL_0, "%s%s:%s\n", space, label, none)
+}
+
+func describeContainerBasicInfo(container corev1.Container, status corev1.ContainerStatus, ok bool, space string, w PrefixWriter) {
+	nameIndent := ""
+	if len(space) > 0 {
+		nameIndent = " "
+	}
+	w.Write(LEVEL_1, "%s%v:\n", nameIndent, container.Name)
+	if ok {
+		w.Write(LEVEL_2, "Container ID:\t%s\n", status.ContainerID)
+	}
+	w.Write(LEVEL_2, "Image:\t%s\n", container.Image)
+	if ok {
+		w.Write(LEVEL_2, "Image ID:\t%s\n", status.ImageID)
+	}
+	portString := describeContainerPorts(container.Ports)
+	if strings.Contains(portString, ",") {
+		w.Write(LEVEL_2, "Ports:\t%s\n", portString)
+	} else {
+		w.Write(LEVEL_2, "Port:\t%s\n", stringOrNone(portString))
+	}
+	hostPortString := describeContainerHostPorts(container.Ports)
+	if strings.Contains(hostPortString, ",") {
+		w.Write(LEVEL_2, "Host Ports:\t%s\n", hostPortString)
+	} else {
+		w.Write(LEVEL_2, "Host Port:\t%s\n", stringOrNone(hostPortString))
+	}
+	if container.SecurityContext != nil && container.SecurityContext.SeccompProfile != nil {
+		w.Write(LEVEL_2, "SeccompProfile:\t%s\n", container.SecurityContext.SeccompProfile.Type)
+		if container.SecurityContext.SeccompProfile.Type == corev1.SeccompProfileTypeLocalhost {
+			w.Write(LEVEL_3, "LocalhostProfile:\t%s\n", *container.SecurityContext.SeccompProfile.LocalhostProfile)
+		}
+	}
+}
+
+func describeContainerPorts(cPorts []corev1.ContainerPort) string {
+	ports := make([]string, 0, len(cPorts))
+	for _, cPort := range cPorts {
+		ports = append(ports, fmt.Sprintf("%d/%s", cPort.ContainerPort, cPort.Protocol))
+	}
+	return strings.Join(ports, ", ")
+}
+
+func describeContainerHostPorts(cPorts []corev1.ContainerPort) string {
+	ports := make([]string, 0, len(cPorts))
+	for _, cPort := range cPorts {
+		ports = append(ports, fmt.Sprintf("%d/%s", cPort.HostPort, cPort.Protocol))
+	}
+	return strings.Join(ports, ", ")
+}
+
+func describeContainerCommand(container corev1.Container, w PrefixWriter) {
+	if len(container.Command) > 0 {
+		w.Write(LEVEL_2, "Command:\n")
+		for _, c := range container.Command {
+			for _, s := range strings.Split(c, "\n") {
+				w.Write(LEVEL_3, "%s\n", s)
+			}
+		}
+	}
+	if len(container.Args) > 0 {
+		w.Write(LEVEL_2, "Args:\n")
+		for _, arg := range container.Args {
+			for _, s := range strings.Split(arg, "\n") {
+				w.Write(LEVEL_3, "%s\n", s)
+			}
+		}
+	}
+}
+
+func describeContainerResource(container corev1.Container, w PrefixWriter) {
+	resources := container.Resources
+	if len(resources.Limits) > 0 {
+		w.Write(LEVEL_2, "Limits:\n")
+	}
+	for _, name := range SortedResourceNames(resources.Limits) {
+		quantity := resources.Limits[name]
+		w.Write(LEVEL_3, "%s:\t%s\n", name, quantity.String())
+	}
+
+	if len(resources.Requests) > 0 {
+		w.Write(LEVEL_2, "Requests:\n")
+	}
+	for _, name := range SortedResourceNames(resources.Requests) {
+		quantity := resources.Requests[name]
+		w.Write(LEVEL_3, "%s:\t%s\n", name, quantity.String())
+	}
+}
+
+func describeContainerState(status corev1.ContainerStatus, w PrefixWriter) {
+	describeStatus("State", status.State, w)
+	if status.LastTerminationState.Terminated != nil {
+		describeStatus("Last State", status.LastTerminationState, w)
+	}
+	w.Write(LEVEL_2, "Ready:\t%v\n", printBool(status.Ready))
+	w.Write(LEVEL_2, "Restart Count:\t%d\n", status.RestartCount)
+}
+
+func describeContainerProbe(container corev1.Container, w PrefixWriter) {
+	if container.LivenessProbe != nil {
+		probe := DescribeProbe(container.LivenessProbe)
+		w.Write(LEVEL_2, "Liveness:\t%s\n", probe)
+	}
+	if container.ReadinessProbe != nil {
+		probe := DescribeProbe(container.ReadinessProbe)
+		w.Write(LEVEL_2, "Readiness:\t%s\n", probe)
+	}
+	if container.StartupProbe != nil {
+		probe := DescribeProbe(container.StartupProbe)
+		w.Write(LEVEL_2, "Startup:\t%s\n", probe)
+	}
+}
+
+func describeContainerVolumes(container corev1.Container, w PrefixWriter) {
+	// Show volumeMounts
+	none := ""
+	if len(container.VolumeMounts) == 0 {
+		none = "\t<none>"
+	}
+	w.Write(LEVEL_2, "Mounts:%s\n", none)
+	sort.Sort(SortableVolumeMounts(container.VolumeMounts))
+	for _, mount := range container.VolumeMounts {
+		flags := []string{}
+		if mount.ReadOnly {
+			flags = append(flags, "ro")
+		} else {
+			flags = append(flags, "rw")
+		}
+		if len(mount.SubPath) > 0 {
+			flags = append(flags, fmt.Sprintf("path=%q", mount.SubPath))
+		}
+		w.Write(LEVEL_3, "%s from %s (%s)\n", mount.MountPath, mount.Name, strings.Join(flags, ","))
+	}
+	// Show volumeDevices if exists
+	if len(container.VolumeDevices) > 0 {
+		w.Write(LEVEL_2, "Devices:%s\n", none)
+		sort.Sort(SortableVolumeDevices(container.VolumeDevices))
+		for _, device := range container.VolumeDevices {
+			w.Write(LEVEL_3, "%s from %s\n", device.DevicePath, device.Name)
+		}
+	}
+}
+
+func describeContainerEnvVars(container corev1.Container, resolverFn EnvVarResolverFunc, w PrefixWriter) {
+	none := ""
+	if len(container.Env) == 0 {
+		none = "\t<none>"
+	}
+	w.Write(LEVEL_2, "Environment:%s\n", none)
+
+	for _, e := range container.Env {
+		if e.ValueFrom == nil {
+			for i, s := range strings.Split(e.Value, "\n") {
+				if i == 0 {
+					w.Write(LEVEL_3, "%s:\t%s\n", e.Name, s)
+				} else {
+					w.Write(LEVEL_3, "\t%s\n", s)
+				}
+			}
+			continue
+		}
+
+		switch {
+		case e.ValueFrom.FieldRef != nil:
+			var valueFrom string
+			if resolverFn != nil {
+				valueFrom = resolverFn(e)
+			}
+			w.Write(LEVEL_3, "%s:\t%s (%s:%s)\n", e.Name, valueFrom, e.ValueFrom.FieldRef.APIVersion, e.ValueFrom.FieldRef.FieldPath)
+		case e.ValueFrom.ResourceFieldRef != nil:
+			valueFrom, err := resourcehelper.ExtractContainerResourceValue(e.ValueFrom.ResourceFieldRef, &container)
+			if err != nil {
+				valueFrom = ""
+			}
+			resource := e.ValueFrom.ResourceFieldRef.Resource
+			if valueFrom == "0" && (resource == "limits.cpu" || resource == "limits.memory") {
+				valueFrom = "node allocatable"
+			}
+			w.Write(LEVEL_3, "%s:\t%s (%s)\n", e.Name, valueFrom, resource)
+		case e.ValueFrom.SecretKeyRef != nil:
+			optional := e.ValueFrom.SecretKeyRef.Optional != nil && *e.ValueFrom.SecretKeyRef.Optional
+			w.Write(LEVEL_3, "%s:\t<set to the key '%s' in secret '%s'>\tOptional: %t\n", e.Name, e.ValueFrom.SecretKeyRef.Key, e.ValueFrom.SecretKeyRef.Name, optional)
+		case e.ValueFrom.ConfigMapKeyRef != nil:
+			optional := e.ValueFrom.ConfigMapKeyRef.Optional != nil && *e.ValueFrom.ConfigMapKeyRef.Optional
+			w.Write(LEVEL_3, "%s:\t<set to the key '%s' of config map '%s'>\tOptional: %t\n", e.Name, e.ValueFrom.ConfigMapKeyRef.Key, e.ValueFrom.ConfigMapKeyRef.Name, optional)
+		}
+	}
+}
+
+func describeContainerEnvFrom(container corev1.Container, resolverFn EnvVarResolverFunc, w PrefixWriter) {
+	none := ""
+	if len(container.EnvFrom) == 0 {
+		none = "\t<none>"
+	}
+	w.Write(LEVEL_2, "Environment Variables from:%s\n", none)
+
+	for _, e := range container.EnvFrom {
+		from := ""
+		name := ""
+		optional := false
+		if e.ConfigMapRef != nil {
+			from = "ConfigMap"
+			name = e.ConfigMapRef.Name
+			optional = e.ConfigMapRef.Optional != nil && *e.ConfigMapRef.Optional
+		} else if e.SecretRef != nil {
+			from = "Secret"
+			name = e.SecretRef.Name
+			optional = e.SecretRef.Optional != nil && *e.SecretRef.Optional
+		}
+		if len(e.Prefix) == 0 {
+			w.Write(LEVEL_3, "%s\t%s\tOptional: %t\n", name, from, optional)
+		} else {
+			w.Write(LEVEL_3, "%s\t%s with prefix '%s'\tOptional: %t\n", name, from, e.Prefix, optional)
+		}
+	}
+}
+
+func describeVolumes(volumes []corev1.Volume, w PrefixWriter, space string) {
+	if len(volumes) == 0 {
+		w.Write(LEVEL_0, "%sVolumes:\t<none>\n", space)
+		return
+	}
+
+	w.Write(LEVEL_0, "%sVolumes:\n", space)
+	for _, volume := range volumes {
+		nameIndent := ""
+		if len(space) > 0 {
+			nameIndent = " "
+		}
+		w.Write(LEVEL_1, "%s%v:\n", nameIndent, volume.Name)
+		switch {
+		case volume.VolumeSource.HostPath != nil:
+			printHostPathVolumeSource(volume.VolumeSource.HostPath, w)
+		case volume.VolumeSource.EmptyDir != nil:
+			printEmptyDirVolumeSource(volume.VolumeSource.EmptyDir, w)
+		case volume.VolumeSource.GCEPersistentDisk != nil:
+			printGCEPersistentDiskVolumeSource(volume.VolumeSource.GCEPersistentDisk, w)
+		case volume.VolumeSource.AWSElasticBlockStore != nil:
+			printAWSElasticBlockStoreVolumeSource(volume.VolumeSource.AWSElasticBlockStore, w)
+		case volume.VolumeSource.GitRepo != nil:
+			printGitRepoVolumeSource(volume.VolumeSource.GitRepo, w)
+		case volume.VolumeSource.Secret != nil:
+			printSecretVolumeSource(volume.VolumeSource.Secret, w)
+		case volume.VolumeSource.ConfigMap != nil:
+			printConfigMapVolumeSource(volume.VolumeSource.ConfigMap, w)
+		case volume.VolumeSource.NFS != nil:
+			printNFSVolumeSource(volume.VolumeSource.NFS, w)
+		case volume.VolumeSource.ISCSI != nil:
+			printISCSIVolumeSource(volume.VolumeSource.ISCSI, w)
+		case volume.VolumeSource.Glusterfs != nil:
+			printGlusterfsVolumeSource(volume.VolumeSource.Glusterfs, w)
+		case volume.VolumeSource.PersistentVolumeClaim != nil:
+			printPersistentVolumeClaimVolumeSource(volume.VolumeSource.PersistentVolumeClaim, w)
+		case volume.VolumeSource.Ephemeral != nil:
+			printEphemeralVolumeSource(volume.VolumeSource.Ephemeral, w)
+		case volume.VolumeSource.RBD != nil:
+			printRBDVolumeSource(volume.VolumeSource.RBD, w)
+		case volume.VolumeSource.Quobyte != nil:
+			printQuobyteVolumeSource(volume.VolumeSource.Quobyte, w)
+		case volume.VolumeSource.DownwardAPI != nil:
+			printDownwardAPIVolumeSource(volume.VolumeSource.DownwardAPI, w)
+		case volume.VolumeSource.AzureDisk != nil:
+			printAzureDiskVolumeSource(volume.VolumeSource.AzureDisk, w)
+		case volume.VolumeSource.VsphereVolume != nil:
+			printVsphereVolumeSource(volume.VolumeSource.VsphereVolume, w)
+		case volume.VolumeSource.Cinder != nil:
+			printCinderVolumeSource(volume.VolumeSource.Cinder, w)
+		case volume.VolumeSource.PhotonPersistentDisk != nil:
+			printPhotonPersistentDiskVolumeSource(volume.VolumeSource.PhotonPersistentDisk, w)
+		case volume.VolumeSource.PortworxVolume != nil:
+			printPortworxVolumeSource(volume.VolumeSource.PortworxVolume, w)
+		case volume.VolumeSource.ScaleIO != nil:
+			printScaleIOVolumeSource(volume.VolumeSource.ScaleIO, w)
+		case volume.VolumeSource.CephFS != nil:
+			printCephFSVolumeSource(volume.VolumeSource.CephFS, w)
+		case volume.VolumeSource.StorageOS != nil:
+			printStorageOSVolumeSource(volume.VolumeSource.StorageOS, w)
+		case volume.VolumeSource.FC != nil:
+			printFCVolumeSource(volume.VolumeSource.FC, w)
+		case volume.VolumeSource.AzureFile != nil:
+			printAzureFileVolumeSource(volume.VolumeSource.AzureFile, w)
+		case volume.VolumeSource.FlexVolume != nil:
+			printFlexVolumeSource(volume.VolumeSource.FlexVolume, w)
+		case volume.VolumeSource.Flocker != nil:
+			printFlockerVolumeSource(volume.VolumeSource.Flocker, w)
+		case volume.VolumeSource.Projected != nil:
+			printProjectedVolumeSource(volume.VolumeSource.Projected, w)
+		case volume.VolumeSource.CSI != nil:
+			printCSIVolumeSource(volume.VolumeSource.CSI, w)
+		default:
+			w.Write(LEVEL_1, "<unknown>\n")
+		}
+	}
+}
+
+func printHostPathVolumeSource(hostPath *corev1.HostPathVolumeSource, w PrefixWriter) {
+	hostPathType := "<none>"
+	if hostPath.Type != nil {
+		hostPathType = string(*hostPath.Type)
+	}
+	w.Write(LEVEL_2, "Type:\tHostPath (bare host directory volume)\n"+
+		"    Path:\t%v\n"+
+		"    HostPathType:\t%v\n",
+		hostPath.Path, hostPathType)
+}
+
+func printEmptyDirVolumeSource(emptyDir *corev1.EmptyDirVolumeSource, w PrefixWriter) {
+	var sizeLimit string
+	if emptyDir.SizeLimit != nil && emptyDir.SizeLimit.Cmp(resource.Quantity{}) > 0 {
+		sizeLimit = fmt.Sprintf("%v", emptyDir.SizeLimit)
+	} else {
+		sizeLimit = "<unset>"
+	}
+	w.Write(LEVEL_2, "Type:\tEmptyDir (a temporary directory that shares a pod's lifetime)\n"+
+		"    Medium:\t%v\n"+
+		"    SizeLimit:\t%v\n",
+		emptyDir.Medium, sizeLimit)
+}
+
+func printGCEPersistentDiskVolumeSource(gce *corev1.GCEPersistentDiskVolumeSource, w PrefixWriter) {
+	w.Write(LEVEL_2, "Type:\tGCEPersistentDisk (a Persistent Disk resource in Google Compute Engine)\n"+
+		"    PDName:\t%v\n"+
+		"    FSType:\t%v\n"+
+		"    Partition:\t%v\n"+
+		"    ReadOnly:\t%v\n",
+		gce.PDName, gce.FSType, gce.Partition, gce.ReadOnly)
+}
+
+func printAWSElasticBlockStoreVolumeSource(aws *corev1.AWSElasticBlockStoreVolumeSource, w PrefixWriter) {
+	w.Write(LEVEL_2, "Type:\tAWSElasticBlockStore (a Persistent Disk resource in AWS)\n"+
+		"    VolumeID:\t%v\n"+
+		"    FSType:\t%v\n"+
+		"    Partition:\t%v\n"+
+		"    ReadOnly:\t%v\n",
+		aws.VolumeID, aws.FSType, aws.Partition, aws.ReadOnly)
+}
+
+func printGitRepoVolumeSource(git *corev1.GitRepoVolumeSource, w PrefixWriter) {
+	w.Write(LEVEL_2, "Type:\tGitRepo (a volume that is pulled from git when the pod is created)\n"+
+		"    Repository:\t%v\n"+
+		"    Revision:\t%v\n",
+		git.Repository, git.Revision)
+}
+
+func printSecretVolumeSource(secret *corev1.SecretVolumeSource, w PrefixWriter) {
+	optional := secret.Optional != nil && *secret.Optional
+	w.Write(LEVEL_2, "Type:\tSecret (a volume populated by a Secret)\n"+
+		"    SecretName:\t%v\n"+
+		"    Optional:\t%v\n",
+		secret.SecretName, optional)
+}
+
+func printConfigMapVolumeSource(configMap *corev1.ConfigMapVolumeSource, w PrefixWriter) {
+	optional := configMap.Optional != nil && *configMap.Optional
+	w.Write(LEVEL_2, "Type:\tConfigMap (a volume populated by a ConfigMap)\n"+
+		"    Name:\t%v\n"+
+		"    Optional:\t%v\n",
+		configMap.Name, optional)
+}
+
+func printProjectedVolumeSource(projected *corev1.ProjectedVolumeSource, w PrefixWriter) {
+	w.Write(LEVEL_2, "Type:\tProjected (a volume that contains injected data from multiple sources)\n")
+	for _, source := range projected.Sources {
+		if source.Secret != nil {
+			w.Write(LEVEL_2, "SecretName:\t%v\n"+
+				"    SecretOptionalName:\t%v\n",
+				source.Secret.Name, source.Secret.Optional)
+		} else if source.DownwardAPI != nil {
+			w.Write(LEVEL_2, "DownwardAPI:\ttrue\n")
+		} else if source.ConfigMap != nil {
+			w.Write(LEVEL_2, "ConfigMapName:\t%v\n"+
+				"    ConfigMapOptional:\t%v\n",
+				source.ConfigMap.Name, source.ConfigMap.Optional)
+		} else if source.ServiceAccountToken != nil {
+			w.Write(LEVEL_2, "TokenExpirationSeconds:\t%d\n",
+				*source.ServiceAccountToken.ExpirationSeconds)
+		}
+	}
+}
+
+func printNFSVolumeSource(nfs *corev1.NFSVolumeSource, w PrefixWriter) {
+	w.Write(LEVEL_2, "Type:\tNFS (an NFS mount that lasts the lifetime of a pod)\n"+
+		"    Server:\t%v\n"+
+		"    Path:\t%v\n"+
+		"    ReadOnly:\t%v\n",
+		nfs.Server, nfs.Path, nfs.ReadOnly)
+}
+
+func printQuobyteVolumeSource(quobyte *corev1.QuobyteVolumeSource, w PrefixWriter) {
+	w.Write(LEVEL_2, "Type:\tQuobyte (a Quobyte mount on the host that shares a pod's lifetime)\n"+
+		"    Registry:\t%v\n"+
+		"    Volume:\t%v\n"+
+		"    ReadOnly:\t%v\n",
+		quobyte.Registry, quobyte.Volume, quobyte.ReadOnly)
+}
+
+func printPortworxVolumeSource(pwxVolume *corev1.PortworxVolumeSource, w PrefixWriter) {
+	w.Write(LEVEL_2, "Type:\tPortworxVolume (a Portworx Volume resource)\n"+
+		"    VolumeID:\t%v\n",
+		pwxVolume.VolumeID)
+}
+
+func printISCSIVolumeSource(iscsi *corev1.ISCSIVolumeSource, w PrefixWriter) {
+	initiator := "<none>"
+	if iscsi.InitiatorName != nil {
+		initiator = *iscsi.InitiatorName
+	}
+	w.Write(LEVEL_2, "Type:\tISCSI (an ISCSI Disk resource that is attached to a kubelet's host machine and then exposed to the pod)\n"+
+		"    TargetPortal:\t%v\n"+
+		"    IQN:\t%v\n"+
+		"    Lun:\t%v\n"+
+		"    ISCSIInterface\t%v\n"+
+		"    FSType:\t%v\n"+
+		"    ReadOnly:\t%v\n"+
+		"    Portals:\t%v\n"+
+		"    DiscoveryCHAPAuth:\t%v\n"+
+		"    SessionCHAPAuth:\t%v\n"+
+		"    SecretRef:\t%v\n"+
+		"    InitiatorName:\t%v\n",
+		iscsi.TargetPortal, iscsi.IQN, iscsi.Lun, iscsi.ISCSIInterface, iscsi.FSType, iscsi.ReadOnly, iscsi.Portals, iscsi.DiscoveryCHAPAuth, iscsi.SessionCHAPAuth, iscsi.SecretRef, initiator)
+}
+
+func printISCSIPersistentVolumeSource(iscsi *corev1.ISCSIPersistentVolumeSource, w PrefixWriter) {
+	initiatorName := "<none>"
+	if iscsi.InitiatorName != nil {
+		initiatorName = *iscsi.InitiatorName
+	}
+	w.Write(LEVEL_2, "Type:\tISCSI (an ISCSI Disk resource that is attached to a kubelet's host machine and then exposed to the pod)\n"+
+		"    TargetPortal:\t%v\n"+
+		"    IQN:\t%v\n"+
+		"    Lun:\t%v\n"+
+		"    ISCSIInterface\t%v\n"+
+		"    FSType:\t%v\n"+
+		"    ReadOnly:\t%v\n"+
+		"    Portals:\t%v\n"+
+		"    DiscoveryCHAPAuth:\t%v\n"+
+		"    SessionCHAPAuth:\t%v\n"+
+		"    SecretRef:\t%v\n"+
+		"    InitiatorName:\t%v\n",
+		iscsi.TargetPortal, iscsi.IQN, iscsi.Lun, iscsi.ISCSIInterface, iscsi.FSType, iscsi.ReadOnly, iscsi.Portals, iscsi.DiscoveryCHAPAuth, iscsi.SessionCHAPAuth, iscsi.SecretRef, initiatorName)
+}
+
+func printGlusterfsVolumeSource(glusterfs *corev1.GlusterfsVolumeSource, w PrefixWriter) {
+	w.Write(LEVEL_2, "Type:\tGlusterfs (a Glusterfs mount on the host that shares a pod's lifetime)\n"+
+		"    EndpointsName:\t%v\n"+
+		"    Path:\t%v\n"+
+		"    ReadOnly:\t%v\n",
+		glusterfs.EndpointsName, glusterfs.Path, glusterfs.ReadOnly)
+}
+
+func printGlusterfsPersistentVolumeSource(glusterfs *corev1.GlusterfsPersistentVolumeSource, w PrefixWriter) {
+	endpointsNamespace := "<unset>"
+	if glusterfs.EndpointsNamespace != nil {
+		endpointsNamespace = *glusterfs.EndpointsNamespace
+	}
+	w.Write(LEVEL_2, "Type:\tGlusterfs (a Glusterfs mount on the host that shares a pod's lifetime)\n"+
+		"    EndpointsName:\t%v\n"+
+		"    EndpointsNamespace:\t%v\n"+
+		"    Path:\t%v\n"+
+		"    ReadOnly:\t%v\n",
+		glusterfs.EndpointsName, endpointsNamespace, glusterfs.Path, glusterfs.ReadOnly)
+}
+
+func printPersistentVolumeClaimVolumeSource(claim *corev1.PersistentVolumeClaimVolumeSource, w PrefixWriter) {
+	w.Write(LEVEL_2, "Type:\tPersistentVolumeClaim (a reference to a PersistentVolumeClaim in the same namespace)\n"+
+		"    ClaimName:\t%v\n"+
+		"    ReadOnly:\t%v\n",
+		claim.ClaimName, claim.ReadOnly)
+}
+
+func printEphemeralVolumeSource(ephemeral *corev1.EphemeralVolumeSource, w PrefixWriter) {
+	w.Write(LEVEL_2, "Type:\tEphemeralVolume (an inline specification for a volume that gets created and deleted with the pod)\n")
+	if ephemeral.VolumeClaimTemplate != nil {
+		printPersistentVolumeClaim(NewNestedPrefixWriter(w, LEVEL_2),
+			&corev1.PersistentVolumeClaim{
+				ObjectMeta: ephemeral.VolumeClaimTemplate.ObjectMeta,
+				Spec:       ephemeral.VolumeClaimTemplate.Spec,
+			}, false /* not a full PVC */)
+	}
+}
+
+func printRBDVolumeSource(rbd *corev1.RBDVolumeSource, w PrefixWriter) {
+	w.Write(LEVEL_2, "Type:\tRBD (a Rados Block Device mount on the host that shares a pod's lifetime)\n"+
+		"    CephMonitors:\t%v\n"+
+		"    RBDImage:\t%v\n"+
+		"    FSType:\t%v\n"+
+		"    RBDPool:\t%v\n"+
+		"    RadosUser:\t%v\n"+
+		"    Keyring:\t%v\n"+
+		"    SecretRef:\t%v\n"+
+		"    ReadOnly:\t%v\n",
+		rbd.CephMonitors, rbd.RBDImage, rbd.FSType, rbd.RBDPool, rbd.RadosUser, rbd.Keyring, rbd.SecretRef, rbd.ReadOnly)
+}
+
+func printRBDPersistentVolumeSource(rbd *corev1.RBDPersistentVolumeSource, w PrefixWriter) {
+	w.Write(LEVEL_2, "Type:\tRBD (a Rados Block Device mount on the host that shares a pod's lifetime)\n"+
+		"    CephMonitors:\t%v\n"+
+		"    RBDImage:\t%v\n"+
+		"    FSType:\t%v\n"+
+		"    RBDPool:\t%v\n"+
+		"    RadosUser:\t%v\n"+
+		"    Keyring:\t%v\n"+
+		"    SecretRef:\t%v\n"+
+		"    ReadOnly:\t%v\n",
+		rbd.CephMonitors, rbd.RBDImage, rbd.FSType, rbd.RBDPool, rbd.RadosUser, rbd.Keyring, rbd.SecretRef, rbd.ReadOnly)
+}
+
+func printDownwardAPIVolumeSource(d *corev1.DownwardAPIVolumeSource, w PrefixWriter) {
+	w.Write(LEVEL_2, "Type:\tDownwardAPI (a volume populated by information about the pod)\n    Items:\n")
+	for _, mapping := range d.Items {
+		if mapping.FieldRef != nil {
+			w.Write(LEVEL_3, "%v -> %v\n", mapping.FieldRef.FieldPath, mapping.Path)
+		}
+		if mapping.ResourceFieldRef != nil {
+			w.Write(LEVEL_3, "%v -> %v\n", mapping.ResourceFieldRef.Resource, mapping.Path)
+		}
+	}
+}
+
+func printAzureDiskVolumeSource(d *corev1.AzureDiskVolumeSource, w PrefixWriter) {
+	w.Write(LEVEL_2, "Type:\tAzureDisk (an Azure Data Disk mount on the host and bind mount to the pod)\n"+
+		"    DiskName:\t%v\n"+
+		"    DiskURI:\t%v\n"+
+		"    Kind: \t%v\n"+
+		"    FSType:\t%v\n"+
+		"    CachingMode:\t%v\n"+
+		"    ReadOnly:\t%v\n",
+		d.DiskName, d.DataDiskURI, *d.Kind, *d.FSType, *d.CachingMode, *d.ReadOnly)
+}
+
+func printVsphereVolumeSource(vsphere *corev1.VsphereVirtualDiskVolumeSource, w PrefixWriter) {
+	w.Write(LEVEL_2, "Type:\tvSphereVolume (a Persistent Disk resource in vSphere)\n"+
+		"    VolumePath:\t%v\n"+
+		"    FSType:\t%v\n"+
+		"    StoragePolicyName:\t%v\n",
+		vsphere.VolumePath, vsphere.FSType, vsphere.StoragePolicyName)
+}
+
+func printPhotonPersistentDiskVolumeSource(photon *corev1.PhotonPersistentDiskVolumeSource, w PrefixWriter) {
+	w.Write(LEVEL_2, "Type:\tPhotonPersistentDisk (a Persistent Disk resource in photon platform)\n"+
+		"    PdID:\t%v\n"+
+		"    FSType:\t%v\n",
+		photon.PdID, photon.FSType)
+}
+
+func printCinderVolumeSource(cinder *corev1.CinderVolumeSource, w PrefixWriter) {
+	w.Write(LEVEL_2, "Type:\tCinder (a Persistent Disk resource in OpenStack)\n"+
+		"    VolumeID:\t%v\n"+
+		"    FSType:\t%v\n"+
+		"    ReadOnly:\t%v\n"+
+		"    SecretRef:\t%v\n",
+		cinder.VolumeID, cinder.FSType, cinder.ReadOnly, cinder.SecretRef)
+}
+
+func printCinderPersistentVolumeSource(cinder *corev1.CinderPersistentVolumeSource, w PrefixWriter) {
+	w.Write(LEVEL_2, "Type:\tCinder (a Persistent Disk resource in OpenStack)\n"+
+		"    VolumeID:\t%v\n"+
+		"    FSType:\t%v\n"+
+		"    ReadOnly:\t%v\n"+
+		"    SecretRef:\t%v\n",
+		cinder.VolumeID, cinder.FSType, cinder.ReadOnly, cinder.SecretRef)
+}
+
+func printScaleIOVolumeSource(sio *corev1.ScaleIOVolumeSource, w PrefixWriter) {
+	w.Write(LEVEL_2, "Type:\tScaleIO (a persistent volume backed by a block device in ScaleIO)\n"+
+		"    Gateway:\t%v\n"+
+		"    System:\t%v\n"+
+		"    Protection Domain:\t%v\n"+
+		"    Storage Pool:\t%v\n"+
+		"    Storage Mode:\t%v\n"+
+		"    VolumeName:\t%v\n"+
+		"    FSType:\t%v\n"+
+		"    ReadOnly:\t%v\n",
+		sio.Gateway, sio.System, sio.ProtectionDomain, sio.StoragePool, sio.StorageMode, sio.VolumeName, sio.FSType, sio.ReadOnly)
+}
+
+func printScaleIOPersistentVolumeSource(sio *corev1.ScaleIOPersistentVolumeSource, w PrefixWriter) {
+	var secretNS, secretName string
+	if sio.SecretRef != nil {
+		secretName = sio.SecretRef.Name
+		secretNS = sio.SecretRef.Namespace
+	}
+	w.Write(LEVEL_2, "Type:\tScaleIO (a persistent volume backed by a block device in ScaleIO)\n"+
+		"    Gateway:\t%v\n"+
+		"    System:\t%v\n"+
+		"    Protection Domain:\t%v\n"+
+		"    Storage Pool:\t%v\n"+
+		"    Storage Mode:\t%v\n"+
+		"    VolumeName:\t%v\n"+
+		"    SecretName:\t%v\n"+
+		"    SecretNamespace:\t%v\n"+
+		"    FSType:\t%v\n"+
+		"    ReadOnly:\t%v\n",
+		sio.Gateway, sio.System, sio.ProtectionDomain, sio.StoragePool, sio.StorageMode, sio.VolumeName, secretName, secretNS, sio.FSType, sio.ReadOnly)
+}
+
+func printLocalVolumeSource(ls *corev1.LocalVolumeSource, w PrefixWriter) {
+	w.Write(LEVEL_2, "Type:\tLocalVolume (a persistent volume backed by local storage on a node)\n"+
+		"    Path:\t%v\n",
+		ls.Path)
+}
+
+func printCephFSVolumeSource(cephfs *corev1.CephFSVolumeSource, w PrefixWriter) {
+	w.Write(LEVEL_2, "Type:\tCephFS (a CephFS mount on the host that shares a pod's lifetime)\n"+
+		"    Monitors:\t%v\n"+
+		"    Path:\t%v\n"+
+		"    User:\t%v\n"+
+		"    SecretFile:\t%v\n"+
+		"    SecretRef:\t%v\n"+
+		"    ReadOnly:\t%v\n",
+		cephfs.Monitors, cephfs.Path, cephfs.User, cephfs.SecretFile, cephfs.SecretRef, cephfs.ReadOnly)
+}
+
+func printCephFSPersistentVolumeSource(cephfs *corev1.CephFSPersistentVolumeSource, w PrefixWriter) {
+	w.Write(LEVEL_2, "Type:\tCephFS (a CephFS mount on the host that shares a pod's lifetime)\n"+
+		"    Monitors:\t%v\n"+
+		"    Path:\t%v\n"+
+		"    User:\t%v\n"+
+		"    SecretFile:\t%v\n"+
+		"    SecretRef:\t%v\n"+
+		"    ReadOnly:\t%v\n",
+		cephfs.Monitors, cephfs.Path, cephfs.User, cephfs.SecretFile, cephfs.SecretRef, cephfs.ReadOnly)
+}
+
+func printStorageOSVolumeSource(storageos *corev1.StorageOSVolumeSource, w PrefixWriter) {
+	w.Write(LEVEL_2, "Type:\tStorageOS (a StorageOS Persistent Disk resource)\n"+
+		"    VolumeName:\t%v\n"+
+		"    VolumeNamespace:\t%v\n"+
+		"    FSType:\t%v\n"+
+		"    ReadOnly:\t%v\n",
+		storageos.VolumeName, storageos.VolumeNamespace, storageos.FSType, storageos.ReadOnly)
+}
+
+func printStorageOSPersistentVolumeSource(storageos *corev1.StorageOSPersistentVolumeSource, w PrefixWriter) {
+	w.Write(LEVEL_2, "Type:\tStorageOS (a StorageOS Persistent Disk resource)\n"+
+		"    VolumeName:\t%v\n"+
+		"    VolumeNamespace:\t%v\n"+
+		"    FSType:\t%v\n"+
+		"    ReadOnly:\t%v\n",
+		storageos.VolumeName, storageos.VolumeNamespace, storageos.FSType, storageos.ReadOnly)
+}
+
+func printFCVolumeSource(fc *corev1.FCVolumeSource, w PrefixWriter) {
+	lun := "<none>"
+	if fc.Lun != nil {
+		lun = strconv.Itoa(int(*fc.Lun))
+	}
+	w.Write(LEVEL_2, "Type:\tFC (a Fibre Channel disk)\n"+
+		"    TargetWWNs:\t%v\n"+
+		"    LUN:\t%v\n"+
+		"    FSType:\t%v\n"+
+		"    ReadOnly:\t%v\n",
+		strings.Join(fc.TargetWWNs, ", "), lun, fc.FSType, fc.ReadOnly)
+}
+
+func printAzureFileVolumeSource(azureFile *corev1.AzureFileVolumeSource, w PrefixWriter) {
+	w.Write(LEVEL_2, "Type:\tAzureFile (an Azure File Service mount on the host and bind mount to the pod)\n"+
+		"    SecretName:\t%v\n"+
+		"    ShareName:\t%v\n"+
+		"    ReadOnly:\t%v\n",
+		azureFile.SecretName, azureFile.ShareName, azureFile.ReadOnly)
+}
+
+func printAzureFilePersistentVolumeSource(azureFile *corev1.AzureFilePersistentVolumeSource, w PrefixWriter) {
+	ns := ""
+	if azureFile.SecretNamespace != nil {
+		ns = *azureFile.SecretNamespace
+	}
+	w.Write(LEVEL_2, "Type:\tAzureFile (an Azure File Service mount on the host and bind mount to the pod)\n"+
+		"    SecretName:\t%v\n"+
+		"    SecretNamespace:\t%v\n"+
+		"    ShareName:\t%v\n"+
+		"    ReadOnly:\t%v\n",
+		azureFile.SecretName, ns, azureFile.ShareName, azureFile.ReadOnly)
+}
+
+func printFlexPersistentVolumeSource(flex *corev1.FlexPersistentVolumeSource, w PrefixWriter) {
+	w.Write(LEVEL_2, "Type:\tFlexVolume (a generic volume resource that is provisioned/attached using an exec based plugin)\n"+
+		"    Driver:\t%v\n"+
+		"    FSType:\t%v\n"+
+		"    SecretRef:\t%v\n"+
+		"    ReadOnly:\t%v\n"+
+		"    Options:\t%v\n",
+		flex.Driver, flex.FSType, flex.SecretRef, flex.ReadOnly, flex.Options)
+}
+
+func printFlexVolumeSource(flex *corev1.FlexVolumeSource, w PrefixWriter) {
+	w.Write(LEVEL_2, "Type:\tFlexVolume (a generic volume resource that is provisioned/attached using an exec based plugin)\n"+
+		"    Driver:\t%v\n"+
+		"    FSType:\t%v\n"+
+		"    SecretRef:\t%v\n"+
+		"    ReadOnly:\t%v\n"+
+		"    Options:\t%v\n",
+		flex.Driver, flex.FSType, flex.SecretRef, flex.ReadOnly, flex.Options)
+}
+
+func printFlockerVolumeSource(flocker *corev1.FlockerVolumeSource, w PrefixWriter) {
+	w.Write(LEVEL_2, "Type:\tFlocker (a Flocker volume mounted by the Flocker agent)\n"+
+		"    DatasetName:\t%v\n"+
+		"    DatasetUUID:\t%v\n",
+		flocker.DatasetName, flocker.DatasetUUID)
+}
+
+func printCSIVolumeSource(csi *corev1.CSIVolumeSource, w PrefixWriter) {
+	var readOnly bool
+	var fsType string
+	if csi.ReadOnly != nil && *csi.ReadOnly {
+		readOnly = true
+	}
+	if csi.FSType != nil {
+		fsType = *csi.FSType
+	}
+	w.Write(LEVEL_2, "Type:\tCSI (a Container Storage Interface (CSI) volume source)\n"+
+		"    Driver:\t%v\n"+
+		"    FSType:\t%v\n"+
+		"    ReadOnly:\t%v\n",
+		csi.Driver, fsType, readOnly)
+	printCSIPersistentVolumeAttributesMultiline(w, "VolumeAttributes", csi.VolumeAttributes)
+}
+
+func printCSIPersistentVolumeSource(csi *corev1.CSIPersistentVolumeSource, w PrefixWriter) {
+	w.Write(LEVEL_2, "Type:\tCSI (a Container Storage Interface (CSI) volume source)\n"+
+		"    Driver:\t%v\n"+
+		"    FSType:\t%v\n"+
+		"    VolumeHandle:\t%v\n"+
+		"    ReadOnly:\t%v\n",
+		csi.Driver, csi.FSType, csi.VolumeHandle, csi.ReadOnly)
+	printCSIPersistentVolumeAttributesMultiline(w, "VolumeAttributes", csi.VolumeAttributes)
+}
+
+func printCSIPersistentVolumeAttributesMultiline(w PrefixWriter, title string, annotations map[string]string) {
+	printCSIPersistentVolumeAttributesMultilineIndent(w, "", title, "\t", annotations, sets.NewString())
+}
+
+func printCSIPersistentVolumeAttributesMultilineIndent(w PrefixWriter, initialIndent, title, innerIndent string, attributes map[string]string, skip sets.String) {
+	w.Write(LEVEL_2, "%s%s:%s", initialIndent, title, innerIndent)
+
+	if len(attributes) == 0 {
+		w.WriteLine("<none>")
+		return
+	}
+
+	// to print labels in the sorted order
+	keys := make([]string, 0, len(attributes))
+	for key := range attributes {
+		if skip.Has(key) {
+			continue
+		}
+		keys = append(keys, key)
+	}
+	if len(attributes) == 0 {
+		w.WriteLine("<none>")
+		return
+	}
+	sort.Strings(keys)
+
+	for i, key := range keys {
+		if i != 0 {
+			w.Write(LEVEL_2, initialIndent)
+			w.Write(LEVEL_2, innerIndent)
+		}
+		line := fmt.Sprintf("%s=%s", key, attributes[key])
+		if len(line) > maxAnnotationLen {
+			w.Write(LEVEL_2, "%s...\n", line[:maxAnnotationLen])
+		} else {
+			w.Write(LEVEL_2, "%s\n", line)
+		}
+	}
+}
+
+// printPodTolerationsMultiline prints multiple tolerations with a proper alignment.
+func printPodTolerationsMultiline(w PrefixWriter, title string, tolerations []corev1.Toleration) {
+	printTolerationsMultilineWithIndent(w, "", title, "\t", tolerations)
+}
+
+// printTolerationsMultilineWithIndent prints multiple tolerations with a user-defined alignment.
+func printTolerationsMultilineWithIndent(w PrefixWriter, initialIndent, title, innerIndent string, tolerations []corev1.Toleration) {
+	w.Write(LEVEL_0, "%s%s:%s", initialIndent, title, innerIndent)
+
+	if len(tolerations) == 0 {
+		w.WriteLine("<none>")
+		return
+	}
+
+	// to print tolerations in the sorted order
+	sort.Slice(tolerations, func(i, j int) bool {
+		return tolerations[i].Key < tolerations[j].Key
+	})
+
+	for i, toleration := range tolerations {
+		if i != 0 {
+			w.Write(LEVEL_0, "%s", initialIndent)
+			w.Write(LEVEL_0, "%s", innerIndent)
+		}
+		w.Write(LEVEL_0, "%s", toleration.Key)
+		if len(toleration.Value) != 0 {
+			w.Write(LEVEL_0, "=%s", toleration.Value)
+		}
+		if len(toleration.Effect) != 0 {
+			w.Write(LEVEL_0, ":%s", toleration.Effect)
+		}
+		// tolerations:
+		// - operator: "Exists"
+		// is a special case which tolerates everything
+		if toleration.Operator == corev1.TolerationOpExists && len(toleration.Value) == 0 {
+			if len(toleration.Key) != 0 || len(toleration.Effect) != 0 {
+				w.Write(LEVEL_0, " op=Exists")
+			} else {
+				w.Write(LEVEL_0, "op=Exists")
+			}
+		}
+
+		if toleration.TolerationSeconds != nil {
+			w.Write(LEVEL_0, " for %ds", *toleration.TolerationSeconds)
+		}
+		w.Write(LEVEL_0, "\n")
+	}
+}
+
+func stringOrNone(s string) string {
+	return stringOrDefaultValue(s, "<none>")
+}
+
+func stringOrDefaultValue(s, defaultValue string) string {
+	if len(s) > 0 {
+		return s
+	}
+	return defaultValue
+}
+
+func describeStatus(stateName string, state corev1.ContainerState, w PrefixWriter) {
+	switch {
+	case state.Running != nil:
+		w.Write(LEVEL_2, "%s:\tRunning\n", stateName)
+		w.Write(LEVEL_3, "Started:\t%v\n", state.Running.StartedAt.Time.Format(time.RFC1123Z))
+	case state.Waiting != nil:
+		w.Write(LEVEL_2, "%s:\tWaiting\n", stateName)
+		if state.Waiting.Reason != "" {
+			w.Write(LEVEL_3, "Reason:\t%s\n", state.Waiting.Reason)
+		}
+	case state.Terminated != nil:
+		w.Write(LEVEL_2, "%s:\tTerminated\n", stateName)
+		if state.Terminated.Reason != "" {
+			w.Write(LEVEL_3, "Reason:\t%s\n", state.Terminated.Reason)
+		}
+		if state.Terminated.Message != "" {
+			w.Write(LEVEL_3, "Message:\t%s\n", state.Terminated.Message)
+		}
+		w.Write(LEVEL_3, "Exit Code:\t%d\n", state.Terminated.ExitCode)
+		if state.Terminated.Signal > 0 {
+			w.Write(LEVEL_3, "Signal:\t%d\n", state.Terminated.Signal)
+		}
+		w.Write(LEVEL_3, "Started:\t%s\n", state.Terminated.StartedAt.Time.Format(time.RFC1123Z))
+		w.Write(LEVEL_3, "Finished:\t%s\n", state.Terminated.FinishedAt.Time.Format(time.RFC1123Z))
+	default:
+		w.Write(LEVEL_2, "%s:\tWaiting\n", stateName)
+	}
+}
+
+func describeTopologySpreadConstraints(tscs []corev1.TopologySpreadConstraint, w PrefixWriter, space string) {
+	if len(tscs) == 0 {
+		return
+	}
+
+	sort.Slice(tscs, func(i, j int) bool {
+		return tscs[i].TopologyKey < tscs[j].TopologyKey
+	})
+
+	w.Write(LEVEL_0, "%sTopology Spread Constraints:\t", space)
+	for i, tsc := range tscs {
+		if i != 0 {
+			w.Write(LEVEL_0, "%s", space)
+			w.Write(LEVEL_0, "%s", "\t")
+		}
+
+		w.Write(LEVEL_0, "%s:", tsc.TopologyKey)
+		w.Write(LEVEL_0, "%v", tsc.WhenUnsatisfiable)
+		w.Write(LEVEL_0, " when max skew %d is exceeded", tsc.MaxSkew)
+		if tsc.LabelSelector != nil {
+			w.Write(LEVEL_0, " for selector %s", metav1.FormatLabelSelector(tsc.LabelSelector))
+		}
+		w.Write(LEVEL_0, "\n")
+	}
+}
+
+func printBool(value bool) string {
+	if value {
+		return "True"
+	}
+
+	return "False"
+}
+
+// printPersistentVolumeClaim is used for both PVCs and PersistentVolumeClaimTemplate. For the latter,
+// we need to skip some fields which have no meaning.
+func printPersistentVolumeClaim(w PrefixWriter, pvc *corev1.PersistentVolumeClaim, isFullPVC bool) {
+	if isFullPVC {
+		w.Write(LEVEL_0, "Name:\t%s\n", pvc.Name)
+		w.Write(LEVEL_0, "Namespace:\t%s\n", pvc.Namespace)
+	}
+	w.Write(LEVEL_0, "StorageClass:\t%s\n", storageutil.GetPersistentVolumeClaimClass(pvc))
+	if isFullPVC {
+		if pvc.ObjectMeta.DeletionTimestamp != nil {
+			w.Write(LEVEL_0, "Status:\tTerminating (lasts %s)\n", translateTimestampSince(*pvc.ObjectMeta.DeletionTimestamp))
+		} else {
+			w.Write(LEVEL_0, "Status:\t%v\n", pvc.Status.Phase)
+		}
+	}
+	w.Write(LEVEL_0, "Volume:\t%s\n", pvc.Spec.VolumeName)
+	printLabelsMultiline(w, "Labels", pvc.Labels)
+	printAnnotationsMultiline(w, "Annotations", pvc.Annotations)
+	if isFullPVC {
+		w.Write(LEVEL_0, "Finalizers:\t%v\n", pvc.ObjectMeta.Finalizers)
+	}
+	storage := pvc.Spec.Resources.Requests[corev1.ResourceStorage]
+	capacity := ""
+	accessModes := ""
+	if pvc.Spec.VolumeName != "" {
+		accessModes = storageutil.GetAccessModesAsString(pvc.Status.AccessModes)
+		storage = pvc.Status.Capacity[corev1.ResourceStorage]
+		capacity = storage.String()
+	}
+	w.Write(LEVEL_0, "Capacity:\t%s\n", capacity)
+	w.Write(LEVEL_0, "Access Modes:\t%s\n", accessModes)
+	if pvc.Spec.VolumeMode != nil {
+		w.Write(LEVEL_0, "VolumeMode:\t%v\n", *pvc.Spec.VolumeMode)
+	}
+	if pvc.Spec.DataSource != nil {
+		w.Write(LEVEL_0, "DataSource:\n")
+		if pvc.Spec.DataSource.APIGroup != nil {
+			w.Write(LEVEL_1, "APIGroup:\t%v\n", *pvc.Spec.DataSource.APIGroup)
+		}
+		w.Write(LEVEL_1, "Kind:\t%v\n", pvc.Spec.DataSource.Kind)
+		w.Write(LEVEL_1, "Name:\t%v\n", pvc.Spec.DataSource.Name)
+	}
+}
+
+func describeService(service *corev1.Service) (string, error) {
+	return tabbedString(func(out io.Writer) error {
+		w := NewPrefixWriter(out)
+		w.Write(LEVEL_0, "Name:\t%s\n", service.Name)
+		w.Write(LEVEL_0, "Namespace:\t%s\n", service.Namespace)
+		printLabelsMultiline(w, "Labels", service.Labels)
+		printAnnotationsMultiline(w, "Annotations", service.Annotations)
+		w.Write(LEVEL_0, "Selector:\t%s\n", labels.FormatLabels(service.Spec.Selector))
+		w.Write(LEVEL_0, "Type:\t%s\n", service.Spec.Type)
+
+		if service.Spec.IPFamilyPolicy != nil {
+			w.Write(LEVEL_0, "IP Family Policy:\t%s\n", *(service.Spec.IPFamilyPolicy))
+		}
+
+		if len(service.Spec.IPFamilies) > 0 {
+			ipfamiliesStrings := make([]string, 0, len(service.Spec.IPFamilies))
+			for _, family := range service.Spec.IPFamilies {
+				ipfamiliesStrings = append(ipfamiliesStrings, string(family))
+			}
+
+			w.Write(LEVEL_0, "IP Families:\t%s\n", strings.Join(ipfamiliesStrings, ","))
+		} else {
+			w.Write(LEVEL_0, "IP Families:\t%s\n", "<none>")
+		}
+
+		w.Write(LEVEL_0, "IP:\t%s\n", service.Spec.ClusterIP)
+		if len(service.Spec.ClusterIPs) > 0 {
+			w.Write(LEVEL_0, "IPs:\t%s\n", strings.Join(service.Spec.ClusterIPs, ","))
+		} else {
+			w.Write(LEVEL_0, "IPs:\t%s\n", "<none>")
+		}
+
+		if len(service.Spec.ExternalIPs) > 0 {
+			w.Write(LEVEL_0, "External IPs:\t%v\n", strings.Join(service.Spec.ExternalIPs, ","))
+		}
+		if service.Spec.LoadBalancerIP != "" {
+			w.Write(LEVEL_0, "IP:\t%s\n", service.Spec.LoadBalancerIP)
+		}
+		if service.Spec.ExternalName != "" {
+			w.Write(LEVEL_0, "External Name:\t%s\n", service.Spec.ExternalName)
+		}
+		if len(service.Status.LoadBalancer.Ingress) > 0 {
+			list := buildIngressString(service.Status.LoadBalancer.Ingress)
+			w.Write(LEVEL_0, "LoadBalancer Ingress:\t%s\n", list)
+		}
+		for i := range service.Spec.Ports {
+			sp := &service.Spec.Ports[i]
+
+			name := sp.Name
+			if name == "" {
+				name = "<unset>"
+			}
+			w.Write(LEVEL_0, "Port:\t%s\t%d/%s\n", name, sp.Port, sp.Protocol)
+			if sp.TargetPort.Type == intstr.Type(intstr.Int) {
+				w.Write(LEVEL_0, "TargetPort:\t%d/%s\n", sp.TargetPort.IntVal, sp.Protocol)
+			} else {
+				w.Write(LEVEL_0, "TargetPort:\t%s/%s\n", sp.TargetPort.StrVal, sp.Protocol)
+			}
+			if sp.NodePort != 0 {
+				w.Write(LEVEL_0, "NodePort:\t%s\t%d/%s\n", name, sp.NodePort, sp.Protocol)
+			}
+			// w.Write(LEVEL_0, "Endpoints:\t%s\n", formatEndpoints(endpoints, sets.NewString(sp.Name)))
+		}
+		w.Write(LEVEL_0, "Session Affinity:\t%s\n", service.Spec.SessionAffinity)
+		if service.Spec.ExternalTrafficPolicy != "" {
+			w.Write(LEVEL_0, "External Traffic Policy:\t%s\n", service.Spec.ExternalTrafficPolicy)
+		}
+		if service.Spec.HealthCheckNodePort != 0 {
+			w.Write(LEVEL_0, "HealthCheck NodePort:\t%d\n", service.Spec.HealthCheckNodePort)
+		}
+		if len(service.Spec.LoadBalancerSourceRanges) > 0 {
+			w.Write(LEVEL_0, "LoadBalancer Source Ranges:\t%v\n", strings.Join(service.Spec.LoadBalancerSourceRanges, ","))
+		}
+		return nil
+	})
+}
+
+func buildIngressString(ingress []corev1.LoadBalancerIngress) string {
+	var buffer bytes.Buffer
+
+	for i := range ingress {
+		if i != 0 {
+			buffer.WriteString(", ")
+		}
+		if ingress[i].IP != "" {
+			buffer.WriteString(ingress[i].IP)
+		} else {
+			buffer.WriteString(ingress[i].Hostname)
+		}
+	}
+	return buffer.String()
+}
+
+func describeDeployment(d *appsv1.Deployment) (string, error) {
+	selector, err := metav1.LabelSelectorAsSelector(d.Spec.Selector)
+	if err != nil {
+		return "", err
+	}
+	return tabbedString(func(out io.Writer) error {
+		w := NewPrefixWriter(out)
+		w.Write(LEVEL_0, "Name:\t%s\n", d.ObjectMeta.Name)
+		w.Write(LEVEL_0, "Namespace:\t%s\n", d.ObjectMeta.Namespace)
+		w.Write(LEVEL_0, "CreationTimestamp:\t%s\n", d.CreationTimestamp.Time.Format(time.RFC1123Z))
+		printLabelsMultiline(w, "Labels", d.Labels)
+		printAnnotationsMultiline(w, "Annotations", d.Annotations)
+		w.Write(LEVEL_0, "Selector:\t%s\n", selector)
+		w.Write(LEVEL_0, "Replicas:\t%d desired | %d updated | %d total | %d available | %d unavailable\n", *(d.Spec.Replicas), d.Status.UpdatedReplicas, d.Status.Replicas, d.Status.AvailableReplicas, d.Status.UnavailableReplicas)
+		w.Write(LEVEL_0, "StrategyType:\t%s\n", d.Spec.Strategy.Type)
+		w.Write(LEVEL_0, "MinReadySeconds:\t%d\n", d.Spec.MinReadySeconds)
+		if d.Spec.Strategy.RollingUpdate != nil {
+			ru := d.Spec.Strategy.RollingUpdate
+			w.Write(LEVEL_0, "RollingUpdateStrategy:\t%s max unavailable, %s max surge\n", ru.MaxUnavailable.String(), ru.MaxSurge.String())
+		}
+		DescribePodTemplate(&d.Spec.Template, w)
+		if len(d.Status.Conditions) > 0 {
+			w.Write(LEVEL_0, "Conditions:\n  Type\tStatus\tReason\n")
+			w.Write(LEVEL_1, "----\t------\t------\n")
+			for _, c := range d.Status.Conditions {
+				w.Write(LEVEL_1, "%v \t%v\t%v\n", c.Type, c.Status, c.Reason)
+			}
+		}
+		return nil
+	})
+}
+
+func describeDaemonSet(daemon *appsv1.DaemonSet) (string, error) {
+	return tabbedString(func(out io.Writer) error {
+		w := NewPrefixWriter(out)
+		w.Write(LEVEL_0, "Name:\t%s\n", daemon.Name)
+		selector, err := metav1.LabelSelectorAsSelector(daemon.Spec.Selector)
+		if err != nil {
+			// this shouldn't happen if LabelSelector passed validation
+			return err
+		}
+		w.Write(LEVEL_0, "Selector:\t%s\n", selector)
+		w.Write(LEVEL_0, "Node-Selector:\t%s\n", labels.FormatLabels(daemon.Spec.Template.Spec.NodeSelector))
+		printLabelsMultiline(w, "Labels", daemon.Labels)
+		printAnnotationsMultiline(w, "Annotations", daemon.Annotations)
+		w.Write(LEVEL_0, "Desired Number of Nodes Scheduled: %d\n", daemon.Status.DesiredNumberScheduled)
+		w.Write(LEVEL_0, "Current Number of Nodes Scheduled: %d\n", daemon.Status.CurrentNumberScheduled)
+		w.Write(LEVEL_0, "Number of Nodes Scheduled with Up-to-date Pods: %d\n", daemon.Status.UpdatedNumberScheduled)
+		w.Write(LEVEL_0, "Number of Nodes Scheduled with Available Pods: %d\n", daemon.Status.NumberAvailable)
+		w.Write(LEVEL_0, "Number of Nodes Misscheduled: %d\n", daemon.Status.NumberMisscheduled)
+		// w.Write(LEVEL_0, "Pods Status:\t%d Running / %d Waiting / %d Succeeded / %d Failed\n", running, waiting, succeeded, failed)
+		DescribePodTemplate(&daemon.Spec.Template, w)
+		return nil
+	})
+}
+
+func describeReplicaSet(rs *appsv1.ReplicaSet) (string, error) {
+	return tabbedString(func(out io.Writer) error {
+		w := NewPrefixWriter(out)
+		w.Write(LEVEL_0, "Name:\t%s\n", rs.Name)
+		w.Write(LEVEL_0, "Namespace:\t%s\n", rs.Namespace)
+		w.Write(LEVEL_0, "Selector:\t%s\n", metav1.FormatLabelSelector(rs.Spec.Selector))
+		printLabelsMultiline(w, "Labels", rs.Labels)
+		printAnnotationsMultiline(w, "Annotations", rs.Annotations)
+		if controlledBy := printController(rs); len(controlledBy) > 0 {
+			w.Write(LEVEL_0, "Controlled By:\t%s\n", controlledBy)
+		}
+		w.Write(LEVEL_0, "Replicas:\t%d current / %d desired\n", rs.Status.Replicas, *rs.Spec.Replicas)
+		// w.Write(LEVEL_0, "Pods Status:\t")
+		// if getPodErr != nil {
+		// 	w.Write(LEVEL_0, "error in fetching pods: %s\n", getPodErr)
+		// } else {
+		// 	w.Write(LEVEL_0, "%d Running / %d Waiting / %d Succeeded / %d Failed\n", running, waiting, succeeded, failed)
+		// }
+		DescribePodTemplate(&rs.Spec.Template, w)
+		if len(rs.Status.Conditions) > 0 {
+			w.Write(LEVEL_0, "Conditions:\n  Type\tStatus\tReason\n")
+			w.Write(LEVEL_1, "----\t------\t------\n")
+			for _, c := range rs.Status.Conditions {
+				w.Write(LEVEL_1, "%v \t%v\t%v\n", c.Type, c.Status, c.Reason)
+			}
+		}
+		return nil
+	})
 }

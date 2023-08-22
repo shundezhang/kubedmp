@@ -29,29 +29,12 @@ Prints a table of the most important information about resources of the specific
   kubedmp get no`,
 	// Args: cobra.MinimumNArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
-		// fmt.Println("dumpdir", len(dumpDir))
-		// dumpFile, err := cmd.Flags().GetString(dumpFileFlag)
-		// if err != nil {
-		// 	log.Fatalf("Please provide a dump file\n")
-		// 	return
-		// }
+
 		if len(args) == 0 {
-			log.Fatalf("Please specify a type: node/no, pod/po, service/svc, deployment/deploy, daemonset/ds, replicaset/rs, event\n")
+			log.Fatalf("Please specify a type: nodes/no, pods/po, services/svc, deployments/deploy, daemonsets/ds, replicasets/rs, events, persistentvolumes/pv, persistentvolumeclaims/pvc \n")
 			return
 		}
-		// namespace := ""
-		// allNS, err := cmd.Flags().GetBool(an)
-		// if err != nil {
-		// 	log.Fatalf("Error parsing all-namespace flag\n")
-		// 	return
-		// }
-		// if !allNS {
-		// 	namespace, err = cmd.Flags().GetString(ns)
-		// 	if err != nil {
-		// 		log.Fatalf("Error parsing namespace flag\n")
-		// 		return
-		// 	}
-		// }
+
 		resType = args[0]
 		resName = ""
 		if len(args) > 1 {
@@ -60,7 +43,7 @@ Prints a table of the most important information about resources of the specific
 		if !hasType(resType) {
 			return
 		}
-		if strings.HasPrefix(resType, "no") {
+		if strings.HasPrefix(resType, "no") ||  resType=="pv" || resType=="persistentvolumes" {
 			resNamespace = ""
 		}
 		// fmt.Printf("In get: parsing dump file %s\n", dumpFile)
@@ -78,6 +61,8 @@ func init() {
 	rootCmd.AddCommand(getCmd)
 	getCmd.Flags().StringVarP(&resNamespace, ns, "n", "default", "namespace of the resources, not applicable to node")
 	getCmd.Flags().BoolVarP(&allNamespaces, an, "A", false, "If present, list the requested object(s) across all namespaces.")
+	getCmd.PersistentFlags().StringVarP(&dumpFile, dumpFileFlag, "f", "./cluster-info.dump", "Path to dump file")
+	getCmd.PersistentFlags().StringVarP(&dumpDir, dumpDirFlag, "d", "", "Path to dump directory")
 }
 
 func contains(s []string, e string) bool {
@@ -92,13 +77,18 @@ func contains(s []string, e string) bool {
 func processDoc(buffer string) {
 	var result map[string]interface{}
 	// fmt.Println(buffer)
+	// fmt.Println("=====================================================")
 	err := json.Unmarshal([]byte(buffer), &result)
 
 	if err != nil {
-		log.Fatalf("Error processing buffer: %v\n%v\n", err.Error(), buffer)
+		// log.Fatalf("Error processing buffer: %v\n%v\n", err.Error(), buffer)
+		return
+	}
+	if result["kind"] == nil {
+		return
 	}
 	// log.Print(resType, resNamespace, resName, result["kind"])
-	if (resType == "no" || resType == "node") && result["kind"] == "NodeList" {
+	if (resType == "no" || resType == "node" || resType == "nodes") && result["kind"] == "NodeList" {
 		for _, item := range result["items"].([]interface{}) {
 			node := item.(map[string]interface{})
 			metadata := node["metadata"].(map[string]interface{})
@@ -108,17 +98,29 @@ func processDoc(buffer string) {
 			}
 			displayItems = append(displayItems, item)
 		}
-	} else if (resType == "po" || resType == "pod") && result["kind"] == "PodList" {
+	} else if (resType == "pv" || resType == "persistentvolume" || resType == "persistentvolumes") && result["kind"] == "PersistentVolumeList" {
+		for _, item := range result["items"].([]interface{}) {
+			pv := item.(map[string]interface{})
+			metadata := pv["metadata"].(map[string]interface{})
+			pvName := metadata["name"].(string)
+			if resName != "" && pvName != resName {
+				continue
+			}
+			displayItems = append(displayItems, item)
+		}
+	} else if (resType == "po" || resType == "pod" || resType == "pods") && result["kind"] == "PodList" {
 		findItems(result["items"].([]interface{}))
-	} else if (resType == "svc" || resType == "service") && result["kind"] == "ServiceList" {
+	} else if (resType == "svc" || resType == "service" || resType == "services") && result["kind"] == "ServiceList" {
 		findItems(result["items"].([]interface{}))
-	} else if (resType == "deploy" || resType == "deployment") && result["kind"] == "DeploymentList" {
+	} else if (resType == "deploy" || resType == "deployment" || resType == "deployments") && result["kind"] == "DeploymentList" {
 		findItems(result["items"].([]interface{}))
-	} else if (resType == "ds" || resType == "daemonset") && result["kind"] == "DaemonSetList" {
+	} else if (resType == "ds" || resType == "daemonset" || resType == "daemonsets") && result["kind"] == "DaemonSetList" {
 		findItems(result["items"].([]interface{}))
-	} else if (resType == "rs" || resType == "replicaset") && result["kind"] == "ReplicaSetList" {
+	} else if (resType == "rs" || resType == "replicaset" || resType == "replicasets") && result["kind"] == "ReplicaSetList" {
 		findItems(result["items"].([]interface{}))
-	} else if resType == "event" && result["kind"] == "EventList" {
+	} else if (resType == "pvc" || resType == "persistentvolumeclaim" || resType == "persistentvolumeclaims") && result["kind"] == "PersistentVolumeClaimList" {
+		findItems(result["items"].([]interface{}))
+	} else if (resType == "event" || resType == "events") && result["kind"] == "EventList" {
 		findItems(result["items"].([]interface{}))
 	}
 }
@@ -142,20 +144,24 @@ func findItems(items []interface{}) {
 
 func printItems() {
 	switch resType {
-	case "no", "node":
+	case "no", "node", "nodes":
 		prettyPrintNodeList(displayItems)
-	case "po", "pod":
+	case "po", "pod", "pods":
 		prettyPrintPodList(displayItems)
-	case "svc", "service":
+	case "svc", "service", "services":
 		prettyPrintServiceList(displayItems)
-	case "deploy", "deployment":
+	case "deploy", "deployment", "deployments":
 		prettyPrintDeploymentList(displayItems)
-	case "ds", "daemonset":
+	case "ds", "daemonset", "daemonsets":
 		prettyPrintDaemonSetList(displayItems)
-	case "rs", "replicaset":
+	case "rs", "replicaset", "replicasets":
 		prettyPrintReplicaSetList(displayItems)
-	case "event":
+	case "event", "events":
 		prettyPrintEventList(displayItems)
+	case "pv", "persistentvolume", "persistentvolumes":
+		prettyPrintPersistentVolumeList(displayItems)
+	case "pvc", "persistentvolumeclaim", "persistentvolumeclaims":
+		prettyPrintPersistentVolumeClaimList(displayItems)
 	}
 }
 
@@ -169,20 +175,24 @@ func traverseDir() {
 	}
 	filename := ""
 	switch resType {
-	case "no", "node":
+	case "no", "node", "nodes":
 		filename = "nodes"
-	case "po", "pod":
+	case "po", "pod", "pods":
 		filename = "pods"
-	case "svc", "service":
+	case "svc", "service", "services":
 		filename = "services"
-	case "deploy", "deployment":
+	case "deploy", "deployment", "deployments":
 		filename = "deployments"
-	case "ds", "daemonset":
+	case "ds", "daemonsets", "daemonset":
 		filename = "daemonsets"
-	case "rs", "replicaset":
+	case "rs", "replicasets", "replicaset":
 		filename = "replicasets"
-	case "event":
+	case "event", "events":
 		filename = "events"
+	case "pv", "persistentvolume", "persistentvolumes":
+		filename = "pvs"
+	case "pvc", "persistentvolumeclaim", "persistentvolumeclaims":
+		filename = "pvcs"
 	}
 	if allNamespaces && !strings.HasPrefix(resType, "no") {
 		subdirs, err1 := os.ReadDir(dumpDir)

@@ -36,6 +36,8 @@ func prettyPrint(buffer string) {
 			prettyPrintReplicaSetList(result["items"].([]interface{}))
 		case "EventList":
 			prettyPrintEventList(result["items"].([]interface{}))
+		case "PersistentVolumeList":
+			prettyPrintPersistentVolumeList(result["items"].([]interface{}))
 		}
 		fmt.Println()
 	}
@@ -64,6 +66,7 @@ var showCmd = &cobra.Command{
 				log.Fatalf("Error to open [dir=%v]: %v", dumpDir, err1.Error())
 			}
 			readFile(filepath.Join(dumpDir, "nodes."+dumpFormat), prettyPrint)
+			readFile(filepath.Join(dumpDir, "pvs."+dumpFormat), prettyPrint)
 			// fmt.Println("-------------")
 			for _, dir := range subdirs {
 				subdirInfo, _ := os.Stat(filepath.Join(dumpDir, dir.Name()))
@@ -98,4 +101,6 @@ var showCmd = &cobra.Command{
 
 func init() {
 	rootCmd.AddCommand(showCmd)
+	showCmd.PersistentFlags().StringVarP(&dumpFile, dumpFileFlag, "f", "./cluster-info.dump", "Path to dump file")
+	showCmd.PersistentFlags().StringVarP(&dumpDir, dumpDirFlag, "d", "", "Path to dump directory")
 }

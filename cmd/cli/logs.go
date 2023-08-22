@@ -81,6 +81,8 @@ func init() {
 	rootCmd.AddCommand(logsCmd)
 	logsCmd.Flags().StringVarP(&resNamespace, ns, "n", "default", "namespace of the pod")
 	logsCmd.Flags().StringVarP(&resContainer, cont, "c", "", "container")
+	logsCmd.PersistentFlags().StringVarP(&dumpFile, dumpFileFlag, "f", "./cluster-info.dump", "Path to dump file")
+	logsCmd.PersistentFlags().StringVarP(&dumpDir, dumpDirFlag, "d", "", "Path to dump directory")
 }
 
 func scanFile(f *os.File, marker string, buff chan string, finishedCh chan bool) {

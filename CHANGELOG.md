@@ -1,3 +1,4 @@
-## version 0.4
+## version 0.5
 
-More bug fixes
+Added dump command
+Added get/describe pv/pvc

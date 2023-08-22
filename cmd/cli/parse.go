@@ -152,16 +152,25 @@ func prettyPrintDeploymentList(items []interface{}) {
 		// fmt.Println("item: ", reflect.TypeOf(item).String())
 		deploy := item.(map[string]interface{})
 		// fmt.Println("item: ", reflect.TypeOf(node["status"]).String())
-		// spec := deploy["spec"].(map[string]interface{})
+		spec := deploy["spec"].(map[string]interface{})
 		metadata := deploy["metadata"].(map[string]interface{})
 		status := deploy["status"].(map[string]interface{})
 		creationTimeStr := metadata["creationTimestamp"].(string)
 		// fmt.Println("creationTimeStr: ", creationTimeStr)
 		age := getAge(creationTimeStr)
-		ready := strconv.FormatInt(int64((status["readyReplicas"].(float64))), 10)
-		replica := strconv.FormatInt(int64((status["replicas"].(float64))), 10)
-		update := strconv.FormatInt(int64((status["updatedReplicas"].(float64))), 10)
-		avail := strconv.FormatInt(int64((status["availableReplicas"].(float64))), 10)
+		ready := "0"
+		if status["readyReplicas"]!=nil {
+			ready = strconv.FormatInt(int64((status["readyReplicas"].(float64))), 10)
+		}
+		replica := strconv.FormatInt(int64((spec["replicas"].(float64))), 10)
+		update:="0"
+		if status["updatedReplicas"]!=nil {
+			update = strconv.FormatInt(int64((status["updatedReplicas"].(float64))), 10)
+		}
+		avail := "0"
+		if status["availableReplicas"] != nil {
+			avail = strconv.FormatInt(int64((status["availableReplicas"].(float64))), 10)
+		}
 		// address := item.(map[string]interface{})["status"]["addresses"].(map[string]interface{})
 		fmt.Fprintf(writer, "%s\t%s\t%s\t%s\t%s\t%s\n", metadata["namespace"], metadata["name"], ready+"/"+replica, update, avail, age)
 	}
@@ -259,6 +268,72 @@ func prettyPrintEventList(items []interface{}) {
 
 		// fmt.Println("item: ", reflect.TypeOf(item).String())
 		// fmt.Println("item: ", reflect.TypeOf(node["status"]).String())
+	}
+	writer.Flush()
+}
+
+func prettyPrintPersistentVolumeList(items []interface{}) {
+	writer := tabwriter.NewWriter(os.Stdout, 0, 8, 1, '\t', tabwriter.AlignRight)
+	fmt.Fprintln(writer, "NAME\tCAPACITY\tACCESS MODES\tRECLAIM POLICY\tSTATUS\tCLAIM\tSTORAGECLASS\tREASON\tAGE\tVOLUMEMODE")
+	for _, item := range items {
+		pv := item.(map[string]interface{})
+		metadata := pv["metadata"].(map[string]interface{})
+		spec := pv["spec"].(map[string]interface{})
+		status := pv["status"].(map[string]interface{})
+		capacity := spec["capacity"].(map[string]interface{})
+		creationTimeStr := metadata["creationTimestamp"].(string)
+		// fmt.Println("creationTimeStr: ", creationTimeStr)
+		age := getAge(creationTimeStr)
+		claim := ""
+		if claimRef, ok1 :=spec["claimRef"].(map[string]interface{}); ok1 {
+			claim=claimRef["namespace"].(string)+"/"+claimRef["name"].(string)
+		}
+		accessMode := ""
+		for i, m := range spec["accessModes"].([]interface{}) {
+			if i>0 {
+				accessMode += ","
+			}
+			accessMode += m.(string)
+		}
+		reason := ""
+		if status["reason"] != nil {
+			reason = status["reason"].(string)
+		}
+		phase := ""
+		if status["phase"] != nil {
+			phase = status["phase"].(string)
+		}
+		fmt.Fprintf(writer, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", metadata["name"], capacity["storage"],accessMode,spec["persistentVolumeReclaimPolicy"], phase, claim, spec["storageClassName"], reason, age, spec["volumeMode"])
+	}
+	writer.Flush()
+}
+
+func prettyPrintPersistentVolumeClaimList(items []interface{}) {
+	writer := tabwriter.NewWriter(os.Stdout, 0, 8, 1, '\t', tabwriter.AlignRight)
+	fmt.Fprintln(writer, "NAMESPACE\tNAME\tSTATUS\tVOLUME\tCAPACITY\tACCESS MODES\tSTORAGECLASS\tAGE\tVOLUMEMODE")
+	for _, item := range items {
+		pvc := item.(map[string]interface{})
+		metadata := pvc["metadata"].(map[string]interface{})
+		spec := pvc["spec"].(map[string]interface{})
+		status := pvc["status"].(map[string]interface{})
+		capacity := status["capacity"].(map[string]interface{})
+		creationTimeStr := metadata["creationTimestamp"].(string)
+		// fmt.Println("creationTimeStr: ", creationTimeStr)
+		age := getAge(creationTimeStr)
+
+		accessMode := ""
+		for i, m := range spec["accessModes"].([]interface{}) {
+			if i>0 {
+				accessMode += ","
+			}
+			accessMode += m.(string)
+		}
+
+		phase := ""
+		if status["phase"] != nil {
+			phase = status["phase"].(string)
+		}
+		fmt.Fprintf(writer, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", metadata["namespace"], metadata["name"], phase, spec["volumeName"], capacity["storage"],accessMode,spec["storageClassName"], age, spec["volumeMode"])
 	}
 	writer.Flush()
 }

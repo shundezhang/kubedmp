@@ -27,6 +27,9 @@ var (
 	resName       string
 	resContainer  string
 	allNamespaces bool
+
+	SupportTypes = []string{"no", "node", "nodes", "po", "pod", "pods", "svc", "service", "services", "deploy", "deployment", "deployments", "ds", "daemonset", "daemonsets", "rs", "replicaset", "replicasets", "event", "events", "pv", "persistentvolumes", "pvc", "persistentvolumeclaim", "persistentvolumeclaims"}
+
 )
 
 const (
@@ -60,9 +63,7 @@ func Execute() {
 
 func init() {
 	cobra.OnInitialize(initConfig)
-	rootCmd.PersistentFlags().StringVarP(&dumpFile, dumpFileFlag, "f", "./cluster-info.dump", "Path to dump file")
 	rootCmd.Flags().BoolVarP(&getVersion, "version", "v", false, "get version")
-	rootCmd.PersistentFlags().StringVarP(&dumpDir, dumpDirFlag, "d", "", "Path to dump directory")
 }
 
 func initConfig() {
@@ -70,7 +71,7 @@ func initConfig() {
 }
 
 func hasType(resType string) bool {
-	if !contains([]string{"no", "node", "po", "pod", "svc", "service", "deploy", "deployment", "ds", "daemonset", "rs", "replicaset", "event"}, resType) {
+	if !contains(SupportTypes, resType) {
 		log.Fatalf("%s is not a supported resource.\n", resType)
 		return false
 	}
