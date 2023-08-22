@@ -4,6 +4,9 @@ The `kubectl cluster-info dump` command dumps cluster information for debugging 
 The output consists of a number of json documents and container logs. It can be very large if all of these are dumped into a single file.
 kubedmp parses the dump file(s) and displays the output nicely in a simliar way as kubectl command's output.
 
+Additionally, `kubectl cluster-info dump` only dumps nodes, events, pods, services, daemonsets, replicasets and deployments. 
+`kubedmp` can dump not only the above but also persistent volumes, persistent volume claims, secrets, config maps, statefulsets and ingresses.
+
 ## Usage
 
 The use of kubedmp is similar to kubectl; it has several sub commands. By default it reads file `./cluster-info.dump` as input; a different file can be specified with flag `-f path/to/dump/file`; if the dump is a directory, specify it with `-d path/to/dump/dir`.
@@ -11,13 +14,12 @@ The use of kubedmp is similar to kubectl; it has several sub commands. By defaul
 ```
 Available Commands:
   describe    Show details of a specific resource
+  dump        Dump relevant information for debugging and diagnosis
   get         Display one or many resources
   logs        Print the logs for a container in a pod
   show        show all objects in cluster info dump file in ps output format
 
 Flags:
-  -d, --dumpdir string    Path to dump dir
-  -f, --dumpfile string   Path to dump file (default "./cluster-info.dump")
   -h, --help              help for kubedmp
   -v, --version           get version
 ```
@@ -38,8 +40,10 @@ Examples:
   kubedmp get no
 
 Flags:
+  -A, --all-namespaces     If present, list the requested object(s) across all namespaces.
   -d, --dumpdir string    Path to dump dir
   -f, --dumpfile string   Path to dump file (default "./cluster-info.dump")
+  -n, --namespace string   namespace of the resources, not applicable to node (default "default")
 ```
 * kubedmp describe
 ```
@@ -59,6 +63,7 @@ Examples:
 Flags:
   -d, --dumpdir string    Path to dump dir
   -f, --dumpfile string   Path to dump file (default "./cluster-info.dump")
+  -n, --namespace string   namespace of the resource, not applicable to node (default "default")
 ```
 * kubedmp logs
 ```
@@ -76,8 +81,10 @@ Examples:
   kubectl logs web-1 -c ruby
 
 Flags:
+  -c, --container string   container
   -d, --dumpdir string    Path to dump dir
   -f, --dumpfile string   Path to dump file (default "./cluster-info.dump")
+  -n, --namespace string   namespace of the pod (default "default")
 ```
 * kubedmp show
 ```
