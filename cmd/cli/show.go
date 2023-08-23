@@ -38,6 +38,8 @@ func prettyPrint(buffer string) {
 			prettyPrintEventList(result["items"].([]interface{}))
 		case "PersistentVolumeList":
 			prettyPrintPersistentVolumeList(result["items"].([]interface{}))
+		case "PersistentVolumeClaimList":
+			prettyPrintPersistentVolumeClaimList(result["items"].([]interface{}))
 		}
 		fmt.Println()
 	}
@@ -80,6 +82,7 @@ var showCmd = &cobra.Command{
 				readFile(filepath.Join(dumpDir, dir.Name(), "deployments."+dumpFormat), prettyPrint)
 				readFile(filepath.Join(dumpDir, dir.Name(), "replicasets."+dumpFormat), prettyPrint)
 				readFile(filepath.Join(dumpDir, dir.Name(), "pods."+dumpFormat), prettyPrint)
+				readFile(filepath.Join(dumpDir, dir.Name(), "pvcs."+dumpFormat), prettyPrint)
 				// readFile(dumpDir, prettyPrint, "event", dir.Name(), "")
 				// fmt.Println("-------------")
 				// readFromDir(dumpDir, prettyPrint, "svc", dir.Name(), "")

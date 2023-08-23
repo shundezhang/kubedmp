@@ -91,6 +91,7 @@ kubedmp dump --namespaces default,kube-system --output-directory=/path/to/cluste
 	dumpCmd.Flags().StringVar(&o.OutputDir, "output-directory", o.OutputDir, "Where to output the files.  If empty or '-' uses stdout, otherwise creates a directory hierarchy in that directory")
 	dumpCmd.Flags().StringSliceVar(&o.Namespaces, "namespaces", o.Namespaces, "A comma separated list of namespaces to dump.")
 	dumpCmd.Flags().BoolVarP(&o.AllNamespaces, "all-namespaces", "A", o.AllNamespaces, "If true, dump all namespaces.  If true, --namespaces is ignored.")
+	dumpCmd.Flags().StringVar(defaultConfigFlags.KubeConfig, "kubeconfig", *defaultConfigFlags.KubeConfig, "Path to the kubeconfig file to use for CLI requests.")
 
 	cmdutil.AddPodRunningTimeoutFlag(dumpCmd, defaultPodLogsTimeout)
 	rootCmd.AddCommand(dumpCmd)
