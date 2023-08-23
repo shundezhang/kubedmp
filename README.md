@@ -142,7 +142,7 @@ brew tap shundezhang/kubedmp
 brew install shundezhang/kubedmp/kubedmp
 ```
 ### Snap
-Snap supports Linux.
+Snap supports Linux. If use snap version, dump files must be put in $HOME due to snap confinement.
 ```
 snap install kubedmp
 ```

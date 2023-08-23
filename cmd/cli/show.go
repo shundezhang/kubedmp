@@ -15,7 +15,8 @@ func prettyPrint(buffer string) {
 	// fmt.Println(buffer)
 	err := json.Unmarshal([]byte(buffer), &result)
 	if err != nil {
-		log.Fatalf("Error processing buffer: %v\n%v\n", err.Error(), buffer)
+		// log.Fatalf("Error processing buffer: %v\n%v\n", err.Error(), buffer)
+		return
 	}
 	// fmt.Println("items: ", reflect.TypeOf(result["items"]).String())
 	if result["kind"] != nil && len(result["items"].([]interface{})) > 0 {

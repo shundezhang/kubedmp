@@ -101,7 +101,7 @@ func readFile(filePath string, pb ProcessBuffer) {
 		if line == "{" {
 			buffer = line
 			inject = true
-		} else if line == "}" {
+		} else if line == "}" && inject {
 			buffer += line
 			inject = false
 			pb(buffer)
