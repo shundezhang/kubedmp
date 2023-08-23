@@ -80,5 +80,5 @@ snapcrafts:
   license: Apache-2.0
   apps:
     kubedmp:
-      plugs: ["home"]
+      plugs: ["home", "network"]
       command: kubedmp

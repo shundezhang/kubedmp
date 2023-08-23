@@ -50,16 +50,7 @@ It can only show detais of one resource, whose type is either node/no, pod/po, s
   $ kubedmp describe po coredns-6bcf44f4cc-j9wkq -n kube-system`,
 	// Args:    cobra.MinimumNArgs(2),
 	Run: func(cmd *cobra.Command, args []string) {
-		// dumpFile, err := cmd.Flags().GetString(dumpFileFlag)
-		// if err != nil {
-		// 	log.Fatalf("Please provide a dump file\n")
-		// 	return
-		// }
-		// namespace, err := cmd.Flags().GetString(ns)
-		// if err != nil {
-		// 	log.Fatalf("Error parsing namespace\n")
-		// 	return
-		// }
+
 		if len(args) < 2 {
 			log.Fatalf("Please specify a type, e.g. node/no, pod/po, service/svc, deployment/deploy, daemonset/ds, replicaset/rs, persistentvolume/pv, persistentvolumeclaim/pvc and an object name\n")
 			return
