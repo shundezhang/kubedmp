@@ -42,7 +42,8 @@ var describeCmd = &cobra.Command{
 	DisableFlagsInUseLine: true,
 	Short:                 "Show details of a specific resource",
 	Long: `Show details of a specific resource. Print a detailed description of the selected resource.
-It can only show detais of one resource, whose type is either node/no, pod/po, service/svc, deployment/deploy, daemonset/ds or replicaset/rs.`,
+It can only show detais of one resource, whose type is either node/no, pod/po, service/svc, deployment/deploy, daemonset/ds,
+replicaset/rs, persistentvolume/pv, persistentvolumeclaim/pvc, statefulset/sts.`,
 	Example: `  # Describe a node
   $ kubedmp describe no juju-ceba75-k8s-2
   
@@ -52,7 +53,7 @@ It can only show detais of one resource, whose type is either node/no, pod/po, s
 	Run: func(cmd *cobra.Command, args []string) {
 
 		if len(args) < 2 {
-			log.Fatalf("Please specify a type, e.g. node/no, pod/po, service/svc, deployment/deploy, daemonset/ds, replicaset/rs, persistentvolume/pv, persistentvolumeclaim/pvc and an object name\n")
+			log.Fatalf("Please specify a type, e.g. node/no, pod/po, service/svc, deployment/deploy, daemonset/ds, replicaset/rs, persistentvolume/pv, persistentvolumeclaim/pvc, statefulset/sts and an object name\n")
 			return
 		}
 		resType = args[0]
@@ -78,6 +79,8 @@ It can only show detais of one resource, whose type is either node/no, pod/po, s
 				filename = "daemonsets"
 			case "rs", "replicaset":
 				filename = "replicasets"
+			case "sts", "statefulset":
+				filename = "statefulsets"
 			case "pvc", "persistentvolumeclaim":
 				filename = "pvcs"
 			case "event":
@@ -240,7 +243,23 @@ func describeObject(buffer string) {
 					break
 				}
 			}			
-		} else if (resType == "pvc" || resType == "persistentvolumeclaim") && kind== "PersistentVolumeClaimList" {
+		} else if (resType == "sts" || resType == "statefulset") && kind== "StatefulSetList" {
+				var stsList appsv1.StatefulSetList
+				err := json.Unmarshal([]byte(buffer), &stsList)
+				if err != nil {
+					log.Fatalf("Error parsing statefulset list: %v\n%v\n", err.Error(), buffer)
+				}
+				for _, sts := range stsList.Items {
+					if resName == sts.Name && resNamespace == sts.Namespace {
+						s, err := describeStatefulSet(&sts)
+						if err!=nil{
+							log.Fatalf("Error generating output for statefulset %s/%s: %s", sts.Namespace,sts.Name,err.Error())
+						}
+						fmt.Println(s)
+						break
+					}
+				}			
+			} else if (resType == "pvc" || resType == "persistentvolumeclaim") && kind== "PersistentVolumeClaimList" {
 				var pvcList corev1.PersistentVolumeClaimList
 				err := json.Unmarshal([]byte(buffer), &pvcList)
 				if err != nil {
@@ -258,6 +277,59 @@ func describeObject(buffer string) {
 				}			
 			}
 
+	}
+}
+
+func describeStatefulSet(ps *appsv1.StatefulSet) (string, error) {
+	return tabbedString(func(out io.Writer) error {
+		w := NewPrefixWriter(out)
+		w.Write(LEVEL_0, "Name:\t%s\n", ps.ObjectMeta.Name)
+		w.Write(LEVEL_0, "Namespace:\t%s\n", ps.ObjectMeta.Namespace)
+		w.Write(LEVEL_0, "CreationTimestamp:\t%s\n", ps.CreationTimestamp.Time.Format(time.RFC1123Z))
+		selector, err := metav1.LabelSelectorAsSelector(ps.Spec.Selector)
+		if err != nil {
+			return err
+		}
+		w.Write(LEVEL_0, "Selector:\t%s\n", selector)
+		printLabelsMultiline(w, "Labels", ps.Labels)
+		printAnnotationsMultiline(w, "Annotations", ps.Annotations)
+		w.Write(LEVEL_0, "Replicas:\t%d desired | %d total\n", *ps.Spec.Replicas, ps.Status.Replicas)
+		w.Write(LEVEL_0, "Update Strategy:\t%s\n", ps.Spec.UpdateStrategy.Type)
+		if ps.Spec.UpdateStrategy.RollingUpdate != nil {
+			ru := ps.Spec.UpdateStrategy.RollingUpdate
+			if ru.Partition != nil {
+				w.Write(LEVEL_1, "Partition:\t%d\n", *ru.Partition)
+				if ru.MaxUnavailable != nil {
+					w.Write(LEVEL_1, "MaxUnavailable:\t%s\n", ru.MaxUnavailable.String())
+				}
+			}
+		}
+
+		// w.Write(LEVEL_0, "Pods Status:\t%d Running / %d Waiting / %d Succeeded / %d Failed\n", running, waiting, succeeded, failed)
+		DescribePodTemplate(&ps.Spec.Template, w)
+		describeVolumeClaimTemplates(ps.Spec.VolumeClaimTemplates, w)
+
+		return nil
+	})
+}
+
+func describeVolumeClaimTemplates(templates []corev1.PersistentVolumeClaim, w PrefixWriter) {
+	if len(templates) == 0 {
+		w.Write(LEVEL_0, "Volume Claims:\t<none>\n")
+		return
+	}
+	w.Write(LEVEL_0, "Volume Claims:\n")
+	for _, pvc := range templates {
+		w.Write(LEVEL_1, "Name:\t%s\n", pvc.Name)
+		w.Write(LEVEL_1, "StorageClass:\t%s\n", storageutil.GetPersistentVolumeClaimClass(&pvc))
+		printLabelsMultilineWithIndent(w, "  ", "Labels", "\t", pvc.Labels, sets.NewString())
+		printLabelsMultilineWithIndent(w, "  ", "Annotations", "\t", pvc.Annotations, sets.NewString())
+		if capacity, ok := pvc.Spec.Resources.Requests[corev1.ResourceStorage]; ok {
+			w.Write(LEVEL_1, "Capacity:\t%s\n", capacity.String())
+		} else {
+			w.Write(LEVEL_1, "Capacity:\t%s\n", "<default>")
+		}
+		w.Write(LEVEL_1, "Access Modes:\t%s\n", pvc.Spec.AccessModes)
 	}
 }
 

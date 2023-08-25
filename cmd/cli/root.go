@@ -28,7 +28,9 @@ var (
 	resContainer  string
 	allNamespaces bool
 
-	SupportTypes = []string{"no", "node", "nodes", "po", "pod", "pods", "svc", "service", "services", "deploy", "deployment", "deployments", "ds", "daemonset", "daemonsets", "rs", "replicaset", "replicasets", "event", "events", "pv", "persistentvolumes", "pvc", "persistentvolumeclaim", "persistentvolumeclaims"}
+	SupportTypes = []string{"no", "node", "nodes", "po", "pod", "pods", "svc", "service", "services", "deploy", "deployment", "deployments",
+		"ds", "daemonset", "daemonsets", "rs", "replicaset", "replicasets", "event", "events", "pv", "persistentvolumes", 
+		"pvc", "persistentvolumeclaim", "persistentvolumeclaims", "sts", "statefulset","statefulsets"}
 
 )
 

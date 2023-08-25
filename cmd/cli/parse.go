@@ -182,11 +182,11 @@ func prettyPrintReplicaSetList(items []interface{}) {
 	fmt.Fprintln(writer, "NAMESPACE\tNAME\tDESIRED\tCURRENT\tREADY\tAGE")
 	for _, item := range items {
 		// fmt.Println("item: ", reflect.TypeOf(item).String())
-		deploy := item.(map[string]interface{})
+		rs := item.(map[string]interface{})
 		// fmt.Println("item: ", reflect.TypeOf(node["status"]).String())
 		// spec := deploy["spec"].(map[string]interface{})
-		metadata := deploy["metadata"].(map[string]interface{})
-		status := deploy["status"].(map[string]interface{})
+		metadata := rs["metadata"].(map[string]interface{})
+		status := rs["status"].(map[string]interface{})
 		creationTimeStr := metadata["creationTimestamp"].(string)
 		// fmt.Println("creationTimeStr: ", creationTimeStr)
 		age := getAge(creationTimeStr)
@@ -203,6 +203,32 @@ func prettyPrintReplicaSetList(items []interface{}) {
 		}
 		// address := item.(map[string]interface{})["status"]["addresses"].(map[string]interface{})
 		fmt.Fprintf(writer, "%s\t%s\t%s\t%s\t%s\t%s\n", metadata["namespace"], metadata["name"], replica, avail, ready, age)
+	}
+	writer.Flush()
+}
+
+func prettyPrintStatefulSetList(items []interface{}) {
+	writer := tabwriter.NewWriter(os.Stdout, 0, 8, 1, '\t', tabwriter.AlignRight)
+	fmt.Fprintln(writer, "NAMESPACE\tNAME\tREADY\tAGE")
+	for _, item := range items {
+		// fmt.Println("item: ", reflect.TypeOf(item).String())
+		sts := item.(map[string]interface{})
+		// fmt.Println("item: ", reflect.TypeOf(node["status"]).String())
+		spec := sts["spec"].(map[string]interface{})
+		metadata := sts["metadata"].(map[string]interface{})
+		status := sts["status"].(map[string]interface{})
+		creationTimeStr := metadata["creationTimestamp"].(string)
+		// fmt.Println("creationTimeStr: ", creationTimeStr)
+		age := getAge(creationTimeStr)
+		// fmt.Println("name: ", metadata["name"])
+		// fmt.Println("ready: ", status["readyReplicas"])
+		replica := strconv.FormatInt(int64((spec["replicas"].(float64))), 10)
+		ready := "0"
+		if status["readyReplicas"].(float64) > 0 {
+			ready = strconv.FormatInt(int64((status["readyReplicas"].(float64))), 10)
+		}
+		// address := item.(map[string]interface{})["status"]["addresses"].(map[string]interface{})
+		fmt.Fprintf(writer, "%s\t%s\t%v/%v\t%s\n", metadata["namespace"], metadata["name"],ready,replica, age)
 	}
 	writer.Flush()
 }

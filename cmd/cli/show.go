@@ -35,6 +35,8 @@ func prettyPrint(buffer string) {
 			prettyPrintDaemonSetList(result["items"].([]interface{}))
 		case "ReplicaSetList":
 			prettyPrintReplicaSetList(result["items"].([]interface{}))
+		case "StatefulSetList":
+			prettyPrintStatefulSetList(result["items"].([]interface{}))
 		case "EventList":
 			prettyPrintEventList(result["items"].([]interface{}))
 		case "PersistentVolumeList":
@@ -82,6 +84,7 @@ var showCmd = &cobra.Command{
 				readFile(filepath.Join(dumpDir, dir.Name(), "daemonsets."+dumpFormat), prettyPrint)
 				readFile(filepath.Join(dumpDir, dir.Name(), "deployments."+dumpFormat), prettyPrint)
 				readFile(filepath.Join(dumpDir, dir.Name(), "replicasets."+dumpFormat), prettyPrint)
+				readFile(filepath.Join(dumpDir, dir.Name(), "statefulsets."+dumpFormat), prettyPrint)
 				readFile(filepath.Join(dumpDir, dir.Name(), "pods."+dumpFormat), prettyPrint)
 				readFile(filepath.Join(dumpDir, dir.Name(), "pvcs."+dumpFormat), prettyPrint)
 				// readFile(dumpDir, prettyPrint, "event", dir.Name(), "")

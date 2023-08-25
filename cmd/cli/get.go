@@ -31,7 +31,7 @@ Prints a table of the most important information about resources of the specific
 	Run: func(cmd *cobra.Command, args []string) {
 
 		if len(args) == 0 {
-			log.Fatalf("Please specify a type: nodes/no, pods/po, services/svc, deployments/deploy, daemonsets/ds, replicasets/rs, events, persistentvolumes/pv, persistentvolumeclaims/pvc \n")
+			log.Fatalf("Please specify a type: nodes/no, pods/po, services/svc, deployments/deploy, daemonsets/ds, replicasets/rs, events, persistentvolumes/pv, persistentvolumeclaims/pvc, statefulsets/sts \n")
 			return
 		}
 
@@ -118,6 +118,8 @@ func processDoc(buffer string) {
 		findItems(result["items"].([]interface{}))
 	} else if (resType == "rs" || resType == "replicaset" || resType == "replicasets") && result["kind"] == "ReplicaSetList" {
 		findItems(result["items"].([]interface{}))
+	} else if (resType == "sts" || resType == "statefulset" || resType == "statefulsets") && result["kind"] == "StatefulSetList" {
+		findItems(result["items"].([]interface{}))
 	} else if (resType == "pvc" || resType == "persistentvolumeclaim" || resType == "persistentvolumeclaims") && result["kind"] == "PersistentVolumeClaimList" {
 		findItems(result["items"].([]interface{}))
 	} else if (resType == "event" || resType == "events") && result["kind"] == "EventList" {
@@ -156,6 +158,8 @@ func printItems() {
 		prettyPrintDaemonSetList(displayItems)
 	case "rs", "replicaset", "replicasets":
 		prettyPrintReplicaSetList(displayItems)
+	case "sts", "statefulset", "statefulsets":
+		prettyPrintStatefulSetList(displayItems)
 	case "event", "events":
 		prettyPrintEventList(displayItems)
 	case "pv", "persistentvolume", "persistentvolumes":
@@ -187,6 +191,8 @@ func traverseDir() {
 		filename = "daemonsets"
 	case "rs", "replicasets", "replicaset":
 		filename = "replicasets"
+	case "sts", "statefulsets", "statefulset":
+		filename = "statefulsets"
 	case "event", "events":
 		filename = "events"
 	case "pv", "persistentvolume", "persistentvolumes":
