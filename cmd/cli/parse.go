@@ -159,12 +159,12 @@ func prettyPrintDeploymentList(items []interface{}) {
 		// fmt.Println("creationTimeStr: ", creationTimeStr)
 		age := getAge(creationTimeStr)
 		ready := "0"
-		if status["readyReplicas"]!=nil {
+		if status["readyReplicas"] != nil {
 			ready = strconv.FormatInt(int64((status["readyReplicas"].(float64))), 10)
 		}
 		replica := strconv.FormatInt(int64((spec["replicas"].(float64))), 10)
-		update:="0"
-		if status["updatedReplicas"]!=nil {
+		update := "0"
+		if status["updatedReplicas"] != nil {
 			update = strconv.FormatInt(int64((status["updatedReplicas"].(float64))), 10)
 		}
 		avail := "0"
@@ -228,7 +228,7 @@ func prettyPrintStatefulSetList(items []interface{}) {
 			ready = strconv.FormatInt(int64((status["readyReplicas"].(float64))), 10)
 		}
 		// address := item.(map[string]interface{})["status"]["addresses"].(map[string]interface{})
-		fmt.Fprintf(writer, "%s\t%s\t%v/%v\t%s\n", metadata["namespace"], metadata["name"],ready,replica, age)
+		fmt.Fprintf(writer, "%s\t%s\t%v/%v\t%s\n", metadata["namespace"], metadata["name"], ready, replica, age)
 	}
 	writer.Flush()
 }
@@ -311,12 +311,12 @@ func prettyPrintPersistentVolumeList(items []interface{}) {
 		// fmt.Println("creationTimeStr: ", creationTimeStr)
 		age := getAge(creationTimeStr)
 		claim := ""
-		if claimRef, ok1 :=spec["claimRef"].(map[string]interface{}); ok1 {
-			claim=claimRef["namespace"].(string)+"/"+claimRef["name"].(string)
+		if claimRef, ok1 := spec["claimRef"].(map[string]interface{}); ok1 {
+			claim = claimRef["namespace"].(string) + "/" + claimRef["name"].(string)
 		}
 		accessMode := ""
 		for i, m := range spec["accessModes"].([]interface{}) {
-			if i>0 {
+			if i > 0 {
 				accessMode += ","
 			}
 			accessMode += m.(string)
@@ -329,7 +329,7 @@ func prettyPrintPersistentVolumeList(items []interface{}) {
 		if status["phase"] != nil {
 			phase = status["phase"].(string)
 		}
-		fmt.Fprintf(writer, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", metadata["name"], capacity["storage"],accessMode,spec["persistentVolumeReclaimPolicy"], phase, claim, spec["storageClassName"], reason, age, spec["volumeMode"])
+		fmt.Fprintf(writer, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", metadata["name"], capacity["storage"], accessMode, spec["persistentVolumeReclaimPolicy"], phase, claim, spec["storageClassName"], reason, age, spec["volumeMode"])
 	}
 	writer.Flush()
 }
@@ -349,7 +349,7 @@ func prettyPrintPersistentVolumeClaimList(items []interface{}) {
 
 		accessMode := ""
 		for i, m := range spec["accessModes"].([]interface{}) {
-			if i>0 {
+			if i > 0 {
 				accessMode += ","
 			}
 			accessMode += m.(string)
@@ -359,7 +359,109 @@ func prettyPrintPersistentVolumeClaimList(items []interface{}) {
 		if status["phase"] != nil {
 			phase = status["phase"].(string)
 		}
-		fmt.Fprintf(writer, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", metadata["namespace"], metadata["name"], phase, spec["volumeName"], capacity["storage"],accessMode,spec["storageClassName"], age, spec["volumeMode"])
+		fmt.Fprintf(writer, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", metadata["namespace"], metadata["name"], phase, spec["volumeName"], capacity["storage"], accessMode, spec["storageClassName"], age, spec["volumeMode"])
+	}
+	writer.Flush()
+}
+
+func prettyPrintSecretList(items []interface{}) {
+	writer := tabwriter.NewWriter(os.Stdout, 0, 8, 1, '\t', tabwriter.AlignRight)
+	fmt.Fprintln(writer, "NAMESPACE\tNAME\tTYPE\tDATA\tAGE")
+	for _, item := range items {
+		secret := item.(map[string]interface{})
+		metadata := secret["metadata"].(map[string]interface{})
+		dataNum := 0
+		if data, ok := secret["data"].(map[string]interface{}); ok {
+			dataNum = len(data)
+		}
+
+		creationTimeStr := metadata["creationTimestamp"].(string)
+		// fmt.Println("creationTimeStr: ", creationTimeStr)
+		age := getAge(creationTimeStr)
+
+		fmt.Fprintf(writer, "%s\t%s\t%v\t%v\t%s\n", metadata["namespace"], metadata["name"], secret["type"], dataNum, age)
+	}
+	writer.Flush()
+}
+
+func prettyPrintConfigMapList(items []interface{}) {
+	writer := tabwriter.NewWriter(os.Stdout, 0, 8, 1, '\t', tabwriter.AlignRight)
+	fmt.Fprintln(writer, "NAMESPACE\tNAME\tDATA\tAGE")
+	for _, item := range items {
+		cm := item.(map[string]interface{})
+		metadata := cm["metadata"].(map[string]interface{})
+		dataNum := 0
+		if data, ok := cm["data"].(map[string]interface{}); ok {
+			dataNum = len(data)
+		}
+
+		creationTimeStr := metadata["creationTimestamp"].(string)
+		// fmt.Println("creationTimeStr: ", creationTimeStr)
+		age := getAge(creationTimeStr)
+
+		fmt.Fprintf(writer, "%s\t%s\t%v\t%s\n", metadata["namespace"], metadata["name"], dataNum, age)
+	}
+	writer.Flush()
+}
+
+func prettyPrintServiceAccountList(items []interface{}) {
+	writer := tabwriter.NewWriter(os.Stdout, 0, 8, 1, '\t', tabwriter.AlignRight)
+	fmt.Fprintln(writer, "NAMESPACE\tNAME\tSECRETS\tAGE")
+	for _, item := range items {
+		sa := item.(map[string]interface{})
+		metadata := sa["metadata"].(map[string]interface{})
+		dataNum := 0
+		if secrets, ok := sa["secrets"].([]interface{}); ok {
+			dataNum = len(secrets)
+		}
+
+		creationTimeStr := metadata["creationTimestamp"].(string)
+		// fmt.Println("creationTimeStr: ", creationTimeStr)
+		age := getAge(creationTimeStr)
+
+		fmt.Fprintf(writer, "%s\t%s\t%v\t%s\n", metadata["namespace"], metadata["name"], dataNum, age)
+	}
+	writer.Flush()
+}
+
+func prettyPrintIngressList(items []interface{}) {
+	writer := tabwriter.NewWriter(os.Stdout, 0, 8, 1, '\t', tabwriter.AlignRight)
+	fmt.Fprintln(writer, "NAMESPACE\tNAME\tCLASS\tHOSTS\tADDRESS\tPORTS\tAGE")
+	for _, item := range items {
+		ing := item.(map[string]interface{})
+		metadata := ing["metadata"].(map[string]interface{})
+		spec := ing["spec"].(map[string]interface{})
+		status := ing["status"].(map[string]interface{})
+		host := "*"
+		port := "80"
+		add := ""
+		if rules, ok := spec["rules"].([]interface{}); ok {
+			for _, item := range rules {
+				rule := item.(map[string]interface{})
+				if hostStr, ok1 := rule["host"]; ok1 {
+					host = hostStr.(string)
+				}
+			}
+		}
+
+		if loadBalancer, ok := status["loadBalancer"].(map[string]interface{}); ok {
+			if ingress, ok1 := loadBalancer["ingress"].([]interface{}); ok1 {
+				for _, item := range ingress {
+					address := item.(map[string]interface{})
+					if ip, ok2 := address["ip"].(string); ok2 {
+						add = ip
+					}
+					if ports, ok2 := address["ports"].(string); ok2 {
+						port = ports
+					}
+				}
+			}
+		}
+		creationTimeStr := metadata["creationTimestamp"].(string)
+		// fmt.Println("creationTimeStr: ", creationTimeStr)
+		age := getAge(creationTimeStr)
+
+		fmt.Fprintf(writer, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n", metadata["namespace"], metadata["name"], spec["ingressClassName"], host, add, port, age)
 	}
 	writer.Flush()
 }

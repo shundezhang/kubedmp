@@ -43,6 +43,14 @@ func prettyPrint(buffer string) {
 			prettyPrintPersistentVolumeList(result["items"].([]interface{}))
 		case "PersistentVolumeClaimList":
 			prettyPrintPersistentVolumeClaimList(result["items"].([]interface{}))
+		case "ConfigMapList":
+			prettyPrintConfigMapList(result["items"].([]interface{}))
+		case "SecretList":
+			prettyPrintSecretList(result["items"].([]interface{}))
+		case "ServiceAccountList":
+			prettyPrintServiceAccountList(result["items"].([]interface{}))
+		case "IngressList":
+			prettyPrintIngressList(result["items"].([]interface{}))
 		}
 		fmt.Println()
 	}
@@ -87,6 +95,10 @@ var showCmd = &cobra.Command{
 				readFile(filepath.Join(dumpDir, dir.Name(), "statefulsets."+dumpFormat), prettyPrint)
 				readFile(filepath.Join(dumpDir, dir.Name(), "pods."+dumpFormat), prettyPrint)
 				readFile(filepath.Join(dumpDir, dir.Name(), "pvcs."+dumpFormat), prettyPrint)
+				readFile(filepath.Join(dumpDir, dir.Name(), "configmaps."+dumpFormat), prettyPrint)
+				readFile(filepath.Join(dumpDir, dir.Name(), "secrets."+dumpFormat), prettyPrint)
+				readFile(filepath.Join(dumpDir, dir.Name(), "serviceaccounts."+dumpFormat), prettyPrint)
+				readFile(filepath.Join(dumpDir, dir.Name(), "ingresses."+dumpFormat), prettyPrint)
 				// readFile(dumpDir, prettyPrint, "event", dir.Name(), "")
 				// fmt.Println("-------------")
 				// readFromDir(dumpDir, prettyPrint, "svc", dir.Name(), "")

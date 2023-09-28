@@ -31,7 +31,7 @@ Prints a table of the most important information about resources of the specific
 	Run: func(cmd *cobra.Command, args []string) {
 
 		if len(args) == 0 {
-			log.Fatalf("Please specify a type: nodes/no, pods/po, services/svc, deployments/deploy, daemonsets/ds, replicasets/rs, events, persistentvolumes/pv, persistentvolumeclaims/pvc, statefulsets/sts \n")
+			log.Fatalf("Please specify a type: nodes/no, pods/po, services/svc, deployments/deploy, daemonsets/ds, replicasets/rs, events, persistentvolumes/pv, persistentvolumeclaims/pvc, statefulsets/sts, secrets \n")
 			return
 		}
 
@@ -43,7 +43,7 @@ Prints a table of the most important information about resources of the specific
 		if !hasType(resType) {
 			return
 		}
-		if strings.HasPrefix(resType, "no") ||  resType=="pv" || resType=="persistentvolumes" {
+		if strings.HasPrefix(resType, "no") || resType == "pv" || resType == "persistentvolumes" {
 			resNamespace = ""
 		}
 		// fmt.Printf("In get: parsing dump file %s\n", dumpFile)
@@ -120,6 +120,14 @@ func processDoc(buffer string) {
 		findItems(result["items"].([]interface{}))
 	} else if (resType == "sts" || resType == "statefulset" || resType == "statefulsets") && result["kind"] == "StatefulSetList" {
 		findItems(result["items"].([]interface{}))
+	} else if (resType == "cm" || resType == "configmap" || resType == "configmaps") && result["kind"] == "ConfigMapList" {
+		findItems(result["items"].([]interface{}))
+	} else if (resType == "secrets" || resType == "secret") && result["kind"] == "SecretList" {
+		findItems(result["items"].([]interface{}))
+	} else if (resType == "sa" || resType == "serviceaccounts" || resType == "serviceaccount") && result["kind"] == "ServiceAccountList" {
+		findItems(result["items"].([]interface{}))
+	} else if (resType == "ing" || resType == "ingress" || resType == "ingresses") && result["kind"] == "IngressList" {
+		findItems(result["items"].([]interface{}))
 	} else if (resType == "pvc" || resType == "persistentvolumeclaim" || resType == "persistentvolumeclaims") && result["kind"] == "PersistentVolumeClaimList" {
 		findItems(result["items"].([]interface{}))
 	} else if (resType == "event" || resType == "events") && result["kind"] == "EventList" {
@@ -166,6 +174,14 @@ func printItems() {
 		prettyPrintPersistentVolumeList(displayItems)
 	case "pvc", "persistentvolumeclaim", "persistentvolumeclaims":
 		prettyPrintPersistentVolumeClaimList(displayItems)
+	case "secret", "secrets":
+		prettyPrintSecretList(displayItems)
+	case "cm", "configmap", "configmaps":
+		prettyPrintConfigMapList(displayItems)
+	case "sa", "serviceaccount", "serviceaccounts":
+		prettyPrintServiceAccountList(displayItems)
+	case "ing", "ingress", "ingresses":
+		prettyPrintIngressList(displayItems)
 	}
 }
 
@@ -199,6 +215,14 @@ func traverseDir() {
 		filename = "pvs"
 	case "pvc", "persistentvolumeclaim", "persistentvolumeclaims":
 		filename = "pvcs"
+	case "cm", "configmap", "configmaps":
+		filename = "configmaps"
+	case "secret", "secrets":
+		filename = "secrets"
+	case "sa", "serviceaccount", "serviceaccounts":
+		filename = "serviceaccounts"
+	case "ing", "ingress", "ingresses":
+		filename = "ingresses"
 	}
 	if allNamespaces && !strings.HasPrefix(resType, "no") {
 		subdirs, err1 := os.ReadDir(dumpDir)

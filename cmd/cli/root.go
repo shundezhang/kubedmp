@@ -29,9 +29,9 @@ var (
 	allNamespaces bool
 
 	SupportTypes = []string{"no", "node", "nodes", "po", "pod", "pods", "svc", "service", "services", "deploy", "deployment", "deployments",
-		"ds", "daemonset", "daemonsets", "rs", "replicaset", "replicasets", "event", "events", "pv", "persistentvolumes", 
-		"pvc", "persistentvolumeclaim", "persistentvolumeclaims", "sts", "statefulset","statefulsets"}
-
+		"ds", "daemonset", "daemonsets", "rs", "replicaset", "replicasets", "event", "events", "pv", "persistentvolumes",
+		"pvc", "persistentvolumeclaim", "persistentvolumeclaims", "sts", "statefulset", "statefulsets", "secrets", "secret",
+		"cm", "configmap", "configmaps", "sa", "serviceaccount", "serviceaccounts", "ing", "ingress", "ingresses"}
 )
 
 const (
@@ -82,12 +82,12 @@ func hasType(resType string) bool {
 
 func readFile(filePath string, pb ProcessBuffer) {
 	// log.Print(filePath)
-	_ , error := os.Stat(filePath)
+	_, error := os.Stat(filePath)
 
 	// check if error is "file not exists"
 	if os.IsNotExist(error) {
 		return
-	} 
+	}
 	f, err := os.Open(filePath)
 	if err != nil {
 		log.Fatalf("Error to read [file=%v]: %v", filePath, err.Error())
