@@ -4,31 +4,33 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+
 	// "net"
 	// "net/url"
 	// "os"
+	"bytes"
+	"io"
 	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
 	"text/tabwriter"
 	"time"
-	"io"
-	"bytes"
 
 	"github.com/spf13/cobra"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	networkingv1 "k8s.io/api/networking/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/apimachinery/pkg/util/duration"
+	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/apimachinery/pkg/util/sets"
 	. "k8s.io/kubectl/pkg/describe"
-	"k8s.io/apimachinery/pkg/util/duration"
 	"k8s.io/kubectl/pkg/util/qos"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	resourcehelper "k8s.io/kubectl/pkg/util/resource"
-	"k8s.io/apimachinery/pkg/api/resource"
 	storageutil "k8s.io/kubectl/pkg/util/storage"
-	"k8s.io/apimachinery/pkg/labels"
-	"k8s.io/apimachinery/pkg/util/intstr"
 )
 
 var (
@@ -88,6 +90,14 @@ replicaset/rs, persistentvolume/pv, persistentvolumeclaim/pvc, statefulset/sts.`
 			case "pv", "persistentvolume":
 				filename = "pvs"
 				resNamespace = ""
+			case "cm", "configmap", "configmaps":
+				filename = "configmaps"
+			case "secret", "secrets":
+				filename = "secrets"
+			case "sa", "serviceaccount", "serviceaccounts":
+				filename = "serviceaccounts"
+			case "ing", "ingress", "ingresses":
+				filename = "ingresses"
 			}
 			filePath = filepath.Join(dumpDir, resNamespace, filename+"."+dumpFormat)
 		}
@@ -139,41 +149,41 @@ func describeObject(buffer string) {
 			}
 			for _, node := range nodeList.Items {
 				if resName == node.Name {
-					s, err :=describeNode(node)
-					if err!=nil{
-						log.Fatalf("Error generating output for node %s: %s", node.Name,err.Error())
+					s, err := describeNode(node)
+					if err != nil {
+						log.Fatalf("Error generating output for node %s: %s", node.Name, err.Error())
 					}
 					fmt.Println(s)
 					break
 				}
 			}
 		} else if (resType == "pv" || resType == "persistentvolume") && kind == "PersistentVolumeList" {
-				var pvList corev1.PersistentVolumeList
-				err := json.Unmarshal([]byte(buffer), &pvList)
-				if err != nil {
-					log.Fatalf("Error parsing pv list: %v\n%v\n", err.Error(), buffer)
-				}
-				for _, pv := range pvList.Items {
-					if resName == pv.Name {
-						s, err :=describePersistentVolume(&pv)
-						if err!=nil{
-							log.Fatalf("Error generating output for pv %s: %s", pv.Name,err.Error())
-						}
-						fmt.Println(s)
-						break
+			var pvList corev1.PersistentVolumeList
+			err := json.Unmarshal([]byte(buffer), &pvList)
+			if err != nil {
+				log.Fatalf("Error parsing pv list: %v\n%v\n", err.Error(), buffer)
+			}
+			for _, pv := range pvList.Items {
+				if resName == pv.Name {
+					s, err := describePersistentVolume(&pv)
+					if err != nil {
+						log.Fatalf("Error generating output for pv %s: %s", pv.Name, err.Error())
 					}
+					fmt.Println(s)
+					break
 				}
-		} else if (resType == "po" || resType == "pod") && kind == "PodList"{
+			}
+		} else if (resType == "po" || resType == "pod") && kind == "PodList" {
 			var podList corev1.PodList
 			err := json.Unmarshal([]byte(buffer), &podList)
 			if err != nil {
 				log.Fatalf("Error parsing pod list: %v\n%v\n", err.Error(), buffer)
 			}
 			for _, pod := range podList.Items {
-				if resName == pod.Name && resNamespace==pod.Namespace {
+				if resName == pod.Name && resNamespace == pod.Namespace {
 					s, err := describePod(&pod)
-					if err!=nil{
-						log.Fatalf("Error generating output for pod %s/%s: %s", pod.Namespace,pod.Name,err.Error())
+					if err != nil {
+						log.Fatalf("Error generating output for pod %s/%s: %s", pod.Namespace, pod.Name, err.Error())
 					}
 					fmt.Println(s)
 					break
@@ -188,8 +198,8 @@ func describeObject(buffer string) {
 			for _, svc := range svcList.Items {
 				if resName == svc.Name && resNamespace == svc.Namespace {
 					s, err := describeService(&svc)
-					if err!=nil{
-						log.Fatalf("Error generating output for service %s/%s: %s", svc.Namespace,svc.Name,err.Error())
+					if err != nil {
+						log.Fatalf("Error generating output for service %s/%s: %s", svc.Namespace, svc.Name, err.Error())
 					}
 					fmt.Println(s)
 					break
@@ -204,14 +214,14 @@ func describeObject(buffer string) {
 			for _, deploy := range deployList.Items {
 				if resName == deploy.Name && resNamespace == deploy.Namespace {
 					s, err := describeDeployment(&deploy)
-					if err!=nil{
-						log.Fatalf("Error generating output for deployment %s/%s: %s", deploy.Namespace,deploy.Name,err.Error())
+					if err != nil {
+						log.Fatalf("Error generating output for deployment %s/%s: %s", deploy.Namespace, deploy.Name, err.Error())
 					}
 					fmt.Println(s)
 					break
 				}
-			}			
-		} else if (resType == "ds" || resType == "daemonset") &&  kind == "DaemonSetList" {
+			}
+		} else if (resType == "ds" || resType == "daemonset") && kind == "DaemonSetList" {
 			var daemonList appsv1.DaemonSetList
 			err := json.Unmarshal([]byte(buffer), &daemonList)
 			if err != nil {
@@ -220,14 +230,14 @@ func describeObject(buffer string) {
 			for _, daemon := range daemonList.Items {
 				if resName == daemon.Name && resNamespace == daemon.Namespace {
 					s, err := describeDaemonSet(&daemon)
-					if err!=nil{
-						log.Fatalf("Error generating output for daemonset %s/%s: %s", daemon.Namespace,daemon.Name,err.Error())
+					if err != nil {
+						log.Fatalf("Error generating output for daemonset %s/%s: %s", daemon.Namespace, daemon.Name, err.Error())
 					}
 					fmt.Println(s)
 					break
 				}
-			}			
-		} else if (resType == "rs" || resType == "replicaset") && kind== "ReplicaSetList" {
+			}
+		} else if (resType == "rs" || resType == "replicaset") && kind == "ReplicaSetList" {
 			var replicaList appsv1.ReplicaSetList
 			err := json.Unmarshal([]byte(buffer), &replicaList)
 			if err != nil {
@@ -236,48 +246,344 @@ func describeObject(buffer string) {
 			for _, rs := range replicaList.Items {
 				if resName == rs.Name && resNamespace == rs.Namespace {
 					s, err := describeReplicaSet(&rs)
-					if err!=nil{
-						log.Fatalf("Error generating output for replicaset %s/%s: %s", rs.Namespace,rs.Name,err.Error())
+					if err != nil {
+						log.Fatalf("Error generating output for replicaset %s/%s: %s", rs.Namespace, rs.Name, err.Error())
 					}
 					fmt.Println(s)
 					break
 				}
-			}			
-		} else if (resType == "sts" || resType == "statefulset") && kind== "StatefulSetList" {
-				var stsList appsv1.StatefulSetList
-				err := json.Unmarshal([]byte(buffer), &stsList)
-				if err != nil {
-					log.Fatalf("Error parsing statefulset list: %v\n%v\n", err.Error(), buffer)
-				}
-				for _, sts := range stsList.Items {
-					if resName == sts.Name && resNamespace == sts.Namespace {
-						s, err := describeStatefulSet(&sts)
-						if err!=nil{
-							log.Fatalf("Error generating output for statefulset %s/%s: %s", sts.Namespace,sts.Name,err.Error())
-						}
-						fmt.Println(s)
-						break
-					}
-				}			
-			} else if (resType == "pvc" || resType == "persistentvolumeclaim") && kind== "PersistentVolumeClaimList" {
-				var pvcList corev1.PersistentVolumeClaimList
-				err := json.Unmarshal([]byte(buffer), &pvcList)
-				if err != nil {
-					log.Fatalf("Error parsing pvc list: %v\n%v\n", err.Error(), buffer)
-				}
-				for _, pvc := range pvcList.Items {
-					if resName == pvc.Name && resNamespace == pvc.Namespace {
-						s, err := describePersistentVolumeClaim(&pvc)
-						if err!=nil{
-							log.Fatalf("Error generating output for pvc %s/%s: %s", pvc.Namespace,pvc.Name,err.Error())
-						}
-						fmt.Println(s)
-						break
-					}
-				}			
 			}
+		} else if (resType == "sts" || resType == "statefulset") && kind == "StatefulSetList" {
+			var stsList appsv1.StatefulSetList
+			err := json.Unmarshal([]byte(buffer), &stsList)
+			if err != nil {
+				log.Fatalf("Error parsing statefulset list: %v\n%v\n", err.Error(), buffer)
+			}
+			for _, sts := range stsList.Items {
+				if resName == sts.Name && resNamespace == sts.Namespace {
+					s, err := describeStatefulSet(&sts)
+					if err != nil {
+						log.Fatalf("Error generating output for statefulset %s/%s: %s", sts.Namespace, sts.Name, err.Error())
+					}
+					fmt.Println(s)
+					break
+				}
+			}
+		} else if (resType == "pvc" || resType == "persistentvolumeclaim") && kind == "PersistentVolumeClaimList" {
+			var pvcList corev1.PersistentVolumeClaimList
+			err := json.Unmarshal([]byte(buffer), &pvcList)
+			if err != nil {
+				log.Fatalf("Error parsing pvc list: %v\n%v\n", err.Error(), buffer)
+			}
+			for _, pvc := range pvcList.Items {
+				if resName == pvc.Name && resNamespace == pvc.Namespace {
+					s, err := describePersistentVolumeClaim(&pvc)
+					if err != nil {
+						log.Fatalf("Error generating output for pvc %s/%s: %s", pvc.Namespace, pvc.Name, err.Error())
+					}
+					fmt.Println(s)
+					break
+				}
+			}
+		} else if (resType == "cm" || resType == "configmap") && kind == "ConfigMapList" {
+			var cmList corev1.ConfigMapList
+			err := json.Unmarshal([]byte(buffer), &cmList)
+			if err != nil {
+				log.Fatalf("Error parsing cm list: %v\n%v\n", err.Error(), buffer)
+			}
+			for _, cm := range cmList.Items {
+				if resName == cm.Name && resNamespace == cm.Namespace {
+					s, err := describeConfigMap(&cm)
+					if err != nil {
+						log.Fatalf("Error generating output for cm %s/%s: %s", cm.Namespace, cm.Name, err.Error())
+					}
+					fmt.Println(s)
+					break
+				}
+			}
+		} else if (resType == "secret") && kind == "SecretList" {
+			var secretList corev1.SecretList
+			err := json.Unmarshal([]byte(buffer), &secretList)
+			if err != nil {
+				log.Fatalf("Error parsing secret list: %v\n%v\n", err.Error(), buffer)
+			}
+			for _, scrt := range secretList.Items {
+				if resName == scrt.Name && resNamespace == scrt.Namespace {
+					s, err := describeSecret(&scrt)
+					if err != nil {
+						log.Fatalf("Error generating output for secret %s/%s: %s", scrt.Namespace, scrt.Name, err.Error())
+					}
+					fmt.Println(s)
+					break
+				}
+			}
+		} else if (resType == "sa" || resType == "serviceaccount") && kind == "ServiceAccountList" {
+			var saList corev1.ServiceAccountList
+			err := json.Unmarshal([]byte(buffer), &saList)
+			if err != nil {
+				log.Fatalf("Error parsing sa list: %v\n%v\n", err.Error(), buffer)
+			}
+			for _, sa := range saList.Items {
+				if resName == sa.Name && resNamespace == sa.Namespace {
+					s, err := describeServiceAccount(&sa)
+					if err != nil {
+						log.Fatalf("Error generating output for sa %s/%s: %s", sa.Namespace, sa.Name, err.Error())
+					}
+					fmt.Println(s)
+					break
+				}
+			}
+		} else if (resType == "ing" || resType == "ingress") && kind == "IngressList" {
+			var ingList networkingv1.IngressList
+			err := json.Unmarshal([]byte(buffer), &ingList)
+			if err != nil {
+				log.Fatalf("Error parsing ingress list: %v\n%v\n", err.Error(), buffer)
+			}
+			for _, ing := range ingList.Items {
+				if resName == ing.Name && resNamespace == ing.Namespace {
+					s, err := describeIngress(&ing)
+					if err != nil {
+						log.Fatalf("Error generating output for ingress %s/%s: %s", ing.Namespace, ing.Name, err.Error())
+					}
+					fmt.Println(s)
+					break
+				}
+			}
+		}
 
 	}
+}
+
+func describeIngress(ing *networkingv1.Ingress) (string, error) {
+	return tabbedString(func(out io.Writer) error {
+		w := NewPrefixWriter(out)
+		w.Write(LEVEL_0, "Name:\t%v\n", ing.Name)
+		printLabelsMultiline(w, "Labels", ing.Labels)
+		w.Write(LEVEL_0, "Namespace:\t%v\n", ing.Namespace)
+		w.Write(LEVEL_0, "Address:\t%v\n", ingressLoadBalancerStatusStringerV1(ing.Status.LoadBalancer, true))
+		ingressClassName := "<none>"
+		if ing.Spec.IngressClassName != nil {
+			ingressClassName = *ing.Spec.IngressClassName
+		}
+		w.Write(LEVEL_0, "Ingress Class:\t%v\n", ingressClassName)
+		def := ing.Spec.DefaultBackend
+		ns := ing.Namespace
+		defaultBackendDescribe := "<default>"
+		if def != nil {
+			defaultBackendDescribe = describeBackendV1(ns, def)
+		}
+		w.Write(LEVEL_0, "Default backend:\t%s\n", defaultBackendDescribe)
+		if len(ing.Spec.TLS) != 0 {
+			describeIngressTLSV1(w, ing.Spec.TLS)
+		}
+		w.Write(LEVEL_0, "Rules:\n  Host\tPath\tBackends\n")
+		w.Write(LEVEL_1, "----\t----\t--------\n")
+		count := 0
+		for _, rules := range ing.Spec.Rules {
+
+			if rules.HTTP == nil {
+				continue
+			}
+			count++
+			host := rules.Host
+			if len(host) == 0 {
+				host = "*"
+			}
+			w.Write(LEVEL_1, "%s\t\n", host)
+			for _, path := range rules.HTTP.Paths {
+				w.Write(LEVEL_2, "\t%s \t%s\n", path.Path, describeBackendV1(ing.Namespace, &path.Backend))
+			}
+		}
+		if count == 0 {
+			w.Write(LEVEL_1, "%s\t%s\t%s\n", "*", "*", defaultBackendDescribe)
+		}
+		printAnnotationsMultiline(w, "Annotations", ing.Annotations)
+
+		return nil
+	})
+}
+
+func describeBackendV1(ns string, backend *networkingv1.IngressBackend) string {
+
+	if backend.Service != nil {
+		sb := serviceBackendStringer(backend.Service)
+		// endpoints, err := i.client.CoreV1().Endpoints(ns).Get(context.TODO(), backend.Service.Name, metav1.GetOptions{})
+		// if err != nil {
+		// 	return fmt.Sprintf("%v (<error: %v>)", sb, err)
+		// }
+		// service, err := i.client.CoreV1().Services(ns).Get(context.TODO(), backend.Service.Name, metav1.GetOptions{})
+		// if err != nil {
+		// 	return fmt.Sprintf("%v(<error: %v>)", sb, err)
+		// }
+		// spName := ""
+		// for i := range service.Spec.Ports {
+		// 	sp := &service.Spec.Ports[i]
+		// 	if backend.Service.Port.Number != 0 && backend.Service.Port.Number == sp.Port {
+		// 		spName = sp.Name
+		// 	} else if len(backend.Service.Port.Name) > 0 && backend.Service.Port.Name == sp.Name {
+		// 		spName = sp.Name
+		// 	}
+		// }
+		// ep := formatEndpoints(endpoints, sets.NewString(spName))
+		return fmt.Sprintf("%s", sb)
+	}
+	if backend.Resource != nil {
+		ic := backend.Resource
+		apiGroup := "<none>"
+		if ic.APIGroup != nil {
+			apiGroup = fmt.Sprintf("%v", *ic.APIGroup)
+		}
+		return fmt.Sprintf("APIGroup: %v, Kind: %v, Name: %v", apiGroup, ic.Kind, ic.Name)
+	}
+	return ""
+}
+
+// backendStringer behaves just like a string interface and converts the given backend to a string.
+func serviceBackendStringer(backend *networkingv1.IngressServiceBackend) string {
+	if backend == nil {
+		return ""
+	}
+	var bPort string
+	if backend.Port.Number != 0 {
+		sNum := int64(backend.Port.Number)
+		bPort = strconv.FormatInt(sNum, 10)
+	} else {
+		bPort = backend.Port.Name
+	}
+	return fmt.Sprintf("%v:%v", backend.Name, bPort)
+}
+
+func describeIngressTLSV1(w PrefixWriter, ingTLS []networkingv1.IngressTLS) {
+	w.Write(LEVEL_0, "TLS:\n")
+	for _, t := range ingTLS {
+		if t.SecretName == "" {
+			w.Write(LEVEL_1, "SNI routes %v\n", strings.Join(t.Hosts, ","))
+		} else {
+			w.Write(LEVEL_1, "%v terminates %v\n", t.SecretName, strings.Join(t.Hosts, ","))
+		}
+	}
+}
+
+// ingressLoadBalancerStatusStringerV1 behaves mostly like a string interface and converts the given status to a string.
+// `wide` indicates whether the returned value is meant for --o=wide output. If not, it's clipped to 16 bytes.
+func ingressLoadBalancerStatusStringerV1(s networkingv1.IngressLoadBalancerStatus, wide bool) string {
+	ingress := s.Ingress
+	result := sets.NewString()
+	for i := range ingress {
+		if ingress[i].IP != "" {
+			result.Insert(ingress[i].IP)
+		} else if ingress[i].Hostname != "" {
+			result.Insert(ingress[i].Hostname)
+		}
+	}
+
+	r := strings.Join(result.List(), ",")
+	if !wide && len(r) > LoadBalancerWidth {
+		r = r[0:(LoadBalancerWidth-3)] + "..."
+	}
+	return r
+}
+
+func describeServiceAccount(serviceAccount *corev1.ServiceAccount) (string, error) {
+	return tabbedString(func(out io.Writer) error {
+		w := NewPrefixWriter(out)
+		w.Write(LEVEL_0, "Name:\t%s\n", serviceAccount.Name)
+		w.Write(LEVEL_0, "Namespace:\t%s\n", serviceAccount.Namespace)
+		printLabelsMultiline(w, "Labels", serviceAccount.Labels)
+		printAnnotationsMultiline(w, "Annotations", serviceAccount.Annotations)
+
+		var (
+			emptyHeader = "                   "
+			pullHeader  = "Image pull secrets:"
+			mountHeader = "Mountable secrets: "
+			tokenHeader = "Tokens:            "
+
+			pullSecretNames  = []string{}
+			mountSecretNames = []string{}
+			tokenSecretNames = []string{}
+		)
+
+		for _, s := range serviceAccount.ImagePullSecrets {
+			pullSecretNames = append(pullSecretNames, s.Name)
+		}
+		for _, s := range serviceAccount.Secrets {
+			mountSecretNames = append(mountSecretNames, s.Name)
+		}
+		// for _, s := range tokens {
+		// 	tokenSecretNames = append(tokenSecretNames, s.Name)
+		// }
+
+		types := map[string][]string{
+			pullHeader:  pullSecretNames,
+			mountHeader: mountSecretNames,
+			tokenHeader: tokenSecretNames,
+		}
+		for _, header := range sets.StringKeySet(types).List() {
+			names := types[header]
+			if len(names) == 0 {
+				w.Write(LEVEL_0, "%s\t<none>\n", header)
+			} else {
+				prefix := header
+				for _, name := range names {
+					// if missingSecrets.Has(name) {
+					// 	w.Write(LEVEL_0, "%s\t%s (not found)\n", prefix, name)
+					// } else {
+					w.Write(LEVEL_0, "%s\t%s\n", prefix, name)
+					// }
+					prefix = emptyHeader
+				}
+			}
+		}
+
+		return nil
+	})
+}
+
+func describeSecret(secret *corev1.Secret) (string, error) {
+	return tabbedString(func(out io.Writer) error {
+		w := NewPrefixWriter(out)
+		w.Write(LEVEL_0, "Name:\t%s\n", secret.Name)
+		w.Write(LEVEL_0, "Namespace:\t%s\n", secret.Namespace)
+		printLabelsMultiline(w, "Labels", secret.Labels)
+		printAnnotationsMultiline(w, "Annotations", secret.Annotations)
+
+		w.Write(LEVEL_0, "\nType:\t%s\n", secret.Type)
+
+		w.Write(LEVEL_0, "\nData\n====\n")
+		for k, v := range secret.Data {
+			switch {
+			case k == corev1.ServiceAccountTokenKey && secret.Type == corev1.SecretTypeServiceAccountToken:
+				w.Write(LEVEL_0, "%s:\t%s\n", k, string(v))
+			default:
+				w.Write(LEVEL_0, "%s:\t%d bytes\n", k, len(v))
+			}
+		}
+
+		return nil
+	})
+}
+
+func describeConfigMap(configMap *corev1.ConfigMap) (string, error) {
+	return tabbedString(func(out io.Writer) error {
+		w := NewPrefixWriter(out)
+		w.Write(LEVEL_0, "Name:\t%s\n", configMap.Name)
+		w.Write(LEVEL_0, "Namespace:\t%s\n", configMap.Namespace)
+		printLabelsMultiline(w, "Labels", configMap.Labels)
+		printAnnotationsMultiline(w, "Annotations", configMap.Annotations)
+
+		w.Write(LEVEL_0, "\nData\n====\n")
+		for k, v := range configMap.Data {
+			w.Write(LEVEL_0, "%s:\n----\n", k)
+			w.Write(LEVEL_0, "%s\n", string(v))
+		}
+		w.Write(LEVEL_0, "\nBinaryData\n====\n")
+		for k, v := range configMap.BinaryData {
+			w.Write(LEVEL_0, "%s: %s bytes\n", k, strconv.Itoa(len(v)))
+		}
+		w.Write(LEVEL_0, "\n")
+
+		return nil
+	})
 }
 
 func describeStatefulSet(ps *appsv1.StatefulSet) (string, error) {
