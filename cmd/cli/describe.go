@@ -43,9 +43,7 @@ var describeCmd = &cobra.Command{
 	Use:                   "describe TYPE RESOURCE_NAME [-n NAMESPACE]",
 	DisableFlagsInUseLine: true,
 	Short:                 "Show details of a specific resource",
-	Long: `Show details of a specific resource. Print a detailed description of the selected resource.
-It can only show detais of one resource, whose type is either node/no, pod/po, service/svc, deployment/deploy, daemonset/ds,
-replicaset/rs, persistentvolume/pv, persistentvolumeclaim/pvc, statefulset/sts.`,
+	Long:                  `Show details of a specific resource. Print a detailed description of the selected resource.`,
 	Example: `  # Describe a node
   $ kubedmp describe no juju-ceba75-k8s-2
   
@@ -55,7 +53,7 @@ replicaset/rs, persistentvolume/pv, persistentvolumeclaim/pvc, statefulset/sts.`
 	Run: func(cmd *cobra.Command, args []string) {
 
 		if len(args) < 2 {
-			log.Fatalf("Please specify a type, e.g. node/no, pod/po, service/svc, deployment/deploy, daemonset/ds, replicaset/rs, persistentvolume/pv, persistentvolumeclaim/pvc, statefulset/sts and an object name\n")
+			log.Fatalf("Please specify a type and an object name\n")
 			return
 		}
 		resType = args[0]

@@ -20,7 +20,7 @@ var getCmd = &cobra.Command{
 	Use:                   "get TYPE [-n NAMESPACE | -A]",
 	DisableFlagsInUseLine: true,
 	Short:                 "Display one or many resources",
-	Long: `Display one or many resources of a type, which can be node/no, pod/po, service/svc, deployment/deploy, daemonset/ds, replicaset/rs or event. 
+	Long: `Display one or many resources of a type. 
 Prints a table of the most important information about resources of the specific type.`,
 	Example: `  # Lists all pods in kube-system namespace in ps output format, the output contains all fields in 'kubectl get -o wide'
   kubedmp get po -n kube-system
@@ -31,7 +31,7 @@ Prints a table of the most important information about resources of the specific
 	Run: func(cmd *cobra.Command, args []string) {
 
 		if len(args) == 0 {
-			log.Fatalf("Please specify a type: nodes/no, pods/po, services/svc, deployments/deploy, daemonsets/ds, replicasets/rs, events, persistentvolumes/pv, persistentvolumeclaims/pvc, statefulsets/sts, secrets \n")
+			log.Fatalf("Please specify a type.\n")
 			return
 		}
 

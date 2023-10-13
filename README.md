@@ -4,8 +4,23 @@ The `kubectl cluster-info dump` command dumps cluster information for debugging 
 The output consists of a number of json documents and container logs. It can be very large if all of these are dumped into a single file.
 kubedmp parses the dump file(s) and displays the output nicely in a simliar way as kubectl command's output.
 
-Additionally, `kubectl cluster-info dump` only dumps nodes, events, pods, services, daemonsets, replicasets and deployments. 
-`kubedmp` can dump not only the above but also persistent volumes, persistent volume claims, secrets, config maps, statefulsets and ingresses.
+Additionally, while `kubectl cluster-info dump` can only dump nodes, events, pods, services, daemonsets, replicasets and deployments, 
+`kubedmp` dumps not only the above but also persistent volumes, persistent volume claims, secrets, config maps, statefulsets and ingresses.
+
+kubedmp can display lists and details of the following resources:
+* nodes
+* events
+* pods
+* services
+* daemonsets
+* replicasets
+* deployments
+* persistent volumes
+* persistent volume claims
+* secrets
+* config maps
+* statefulsets
+* ingresses
 
 ## Usage
 
@@ -26,7 +41,7 @@ Flags:
 
 * kubedmp get
 ```
-Display one or many resources of a type, which can be node/no, pod/po, service/svc, deployment/deploy, daemonset/ds, replicaset/rs or event. 
+Display one or many resources of a type. 
 Prints a table of the most important information about resources of the specific type.
 
 Usage:
@@ -48,7 +63,6 @@ Flags:
 * kubedmp describe
 ```
 Show details of a specific resource. Print a detailed description of the selected resource.
-It can only show detais of one resource, whose type is either node/no, pod/po, service/svc, deployment/deploy, daemonset/ds or replicaset/rs.
 
 Usage:
   kubedmp describe TYPE RESOURCE_NAME [-n NAMESPACE]

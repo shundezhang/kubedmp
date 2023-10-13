@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strings"
+	"text/tabwriter"
 
 	"github.com/shundezhang/kubedmp/cmd/build"
 	"github.com/spf13/cobra"
@@ -17,6 +19,7 @@ var (
 	dumpFileFlag = "dumpfile"
 	dumpDirFlag  = "dumpdir"
 	getVersion   bool
+	getTypes     bool
 
 	dumpFile   string
 	dumpDir    string
@@ -28,10 +31,22 @@ var (
 	resContainer  string
 	allNamespaces bool
 
-	SupportTypes = []string{"no", "node", "nodes", "po", "pod", "pods", "svc", "service", "services", "deploy", "deployment", "deployments",
-		"ds", "daemonset", "daemonsets", "rs", "replicaset", "replicasets", "event", "events", "pv", "persistentvolumes",
-		"pvc", "persistentvolumeclaim", "persistentvolumeclaims", "sts", "statefulset", "statefulsets", "secrets", "secret",
-		"cm", "configmap", "configmaps", "sa", "serviceaccount", "serviceaccounts", "ing", "ingress", "ingresses"}
+	SupportTypes = map[string][]string{
+		"Node":                    {"no", "node", "nodes"},
+		"Pod":                     {"po", "pod", "pods"},
+		"Service":                 {"svc", "service", "services"},
+		"Deployment":              {"deploy", "deployment", "deployments"},
+		"DaemonSet":               {"ds", "daemonset", "daemonsets"},
+		"ReplicaSet":              {"rs", "replicaset", "replicasets"},
+		"Event":                   {"event", "events"},
+		"Persistent Volume":       {"pv", "persistentvolumes"},
+		"Persistent Volume Claim": {"pvc", "persistentvolumeclaim", "persistentvolumeclaims"},
+		"StatefulSet":             {"sts", "statefulset", "statefulsets"},
+		"Secret":                  {"secrets", "secret"},
+		"ConfigMap":               {"cm", "configmap", "configmaps"},
+		"Service Account":         {"sa", "serviceaccount", "serviceaccounts"},
+		"Ingress":                 {"ing", "ingress", "ingresses"},
+	}
 )
 
 const (
@@ -51,6 +66,15 @@ var rootCmd = &cobra.Command{
 			fmt.Println("build.User:\t", build.User)
 			os.Exit(0)
 		}
+		if getTypes {
+			writer := tabwriter.NewWriter(os.Stdout, 0, 8, 1, '\t', tabwriter.AlignRight)
+			fmt.Println("Supported types: ")
+			for name, types := range SupportTypes {
+				fmt.Fprintf(writer, "  %s:\t%s\n", name, strings.Join(types, " "))
+			}
+			writer.Flush()
+			os.Exit(0)
+		}
 		cmd.Help()
 		os.Exit(0)
 	},
@@ -66,6 +90,7 @@ func Execute() {
 func init() {
 	cobra.OnInitialize(initConfig)
 	rootCmd.Flags().BoolVarP(&getVersion, "version", "v", false, "get version")
+	rootCmd.Flags().BoolVarP(&getTypes, "types", "t", false, "show supported resource types")
 }
 
 func initConfig() {
@@ -73,11 +98,15 @@ func initConfig() {
 }
 
 func hasType(resType string) bool {
-	if !contains(SupportTypes, resType) {
-		log.Fatalf("%s is not a supported resource.\n", resType)
-		return false
+	for _, types := range SupportTypes {
+		if contains(types, resType) {
+			return true
+		}
 	}
-	return true
+
+	log.Fatalf("%s is not a supported resource type.\n", resType)
+	return false
+
 }
 
 func readFile(filePath string, pb ProcessBuffer) {

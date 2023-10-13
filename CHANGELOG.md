@@ -1,4 +1,3 @@
-## version 0.5
+## version 0.6
 
-Added dump command
-Added get/describe pv/pvc
+Added get/describe sts/cm/secret/sa/ing
