@@ -2,21 +2,26 @@ package cli
 
 import (
 	"context"
-	cmdutil "k8s.io/kubectl/pkg/cmd/util"
-	. "k8s.io/kubectl/pkg/cmd/clusterinfo"
+
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/cli-runtime/pkg/genericclioptions"
 	"k8s.io/cli-runtime/pkg/genericiooptions"
-	"k8s.io/kubectl/pkg/scheme"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	batchclient "k8s.io/client-go/kubernetes/typed/batch/v1"
 	networkingclient "k8s.io/client-go/kubernetes/typed/networking/v1"
+	rbacclient "k8s.io/client-go/kubernetes/typed/rbac/v1"
+	storageclient "k8s.io/client-go/kubernetes/typed/storage/v1"
+	. "k8s.io/kubectl/pkg/cmd/clusterinfo"
+	cmdutil "k8s.io/kubectl/pkg/cmd/util"
+	"k8s.io/kubectl/pkg/scheme"
 
 	// "k8s.io/kubectl/pkg/cmd/plugin"
 	// "k8s.io/kubectl/pkg/cmd"
-	"time"
-	"os"
-	"github.com/spf13/cobra"
 	"io"
+	"os"
 	"path"
+	"time"
+
+	"github.com/spf13/cobra"
 )
 
 const (
@@ -25,7 +30,10 @@ const (
 )
 
 type ExtraInfoDumpOptions struct {
-	NetworkingClient       networkingclient.NetworkingV1Interface
+	NetworkingClient networkingclient.NetworkingV1Interface
+	StorageClient    storageclient.StorageV1Interface
+	BatchClient      batchclient.BatchV1Interface
+	RbacClient       *rbacclient.RbacV1Client
 	ClusterInfoDumpOptions
 }
 
@@ -47,7 +55,6 @@ func init() {
 	matchVersionKubeConfigFlags := cmdutil.NewMatchVersionFlags(defaultConfigFlags)
 	// matchVersionKubeConfigFlags.AddFlags(flags)
 	restClientGetter := cmdutil.NewFactory(matchVersionKubeConfigFlags)
-
 
 	o := &ExtraInfoDumpOptions{
 		ClusterInfoDumpOptions: ClusterInfoDumpOptions{
@@ -119,14 +126,27 @@ func (o *ExtraInfoDumpOptions) CompleteExtra(restClientGetter genericclioptions.
 	if err != nil {
 		return err
 	}
+
+	o.StorageClient, err = storageclient.NewForConfig(config)
+	if err != nil {
+		return err
+	}
+
+	o.BatchClient, err = batchclient.NewForConfig(config)
+	if err != nil {
+		return err
+	}
+
+	o.RbacClient, err = rbacclient.NewForConfig(config)
+	if err != nil {
+		return err
+	}
+
 	return nil
 }
 
 func (o *ExtraInfoDumpOptions) runExtra() error {
-	pvs, err := o.CoreClient.PersistentVolumes().List(context.TODO(), metav1.ListOptions{})
-	if err != nil {
-		return err
-	}
+
 	fileExtension := ".txt"
 	if o.PrintFlags.OutputFormat != nil {
 		switch *o.PrintFlags.OutputFormat {
@@ -137,7 +157,35 @@ func (o *ExtraInfoDumpOptions) runExtra() error {
 		}
 	}
 
+	pvs, err := o.CoreClient.PersistentVolumes().List(context.TODO(), metav1.ListOptions{})
+	if err != nil {
+		return err
+	}
 	if err := o.PrintObj(pvs, setupOutputWriter(o.OutputDir, o.Out, "pvs", fileExtension)); err != nil {
+		return err
+	}
+
+	scs, err := o.StorageClient.StorageClasses().List(context.TODO(), metav1.ListOptions{})
+	if err != nil {
+		return err
+	}
+	if err := o.PrintObj(scs, setupOutputWriter(o.OutputDir, o.Out, "scs", fileExtension)); err != nil {
+		return err
+	}
+
+	clusterroles, err := o.RbacClient.ClusterRoles().List(context.TODO(), metav1.ListOptions{})
+	if err != nil {
+		return err
+	}
+	if err := o.PrintObj(clusterroles, setupOutputWriter(o.OutputDir, o.Out, "clusterroles", fileExtension)); err != nil {
+		return err
+	}
+
+	clusterrolebindings, err := o.RbacClient.ClusterRoleBindings().List(context.TODO(), metav1.ListOptions{})
+	if err != nil {
+		return err
+	}
+	if err := o.PrintObj(clusterrolebindings, setupOutputWriter(o.OutputDir, o.Out, "clusterrolebindings", fileExtension)); err != nil {
 		return err
 	}
 
@@ -161,6 +209,14 @@ func (o *ExtraInfoDumpOptions) runExtra() error {
 		}
 	}
 	for _, namespace := range namespaces {
+		endpoints, err := o.CoreClient.Endpoints(namespace).List(context.TODO(), metav1.ListOptions{})
+		if err != nil {
+			return err
+		}
+		if err := o.PrintObj(endpoints, setupOutputWriter(o.OutputDir, o.Out, path.Join(namespace, "endpoints"), fileExtension)); err != nil {
+			return err
+		}
+
 		pvcs, err := o.CoreClient.PersistentVolumeClaims(namespace).List(context.TODO(), metav1.ListOptions{})
 		if err != nil {
 			return err
@@ -206,6 +262,38 @@ func (o *ExtraInfoDumpOptions) runExtra() error {
 			return err
 		}
 		if err := o.PrintObj(ingresses, setupOutputWriter(o.OutputDir, o.Out, path.Join(namespace, "ingresses"), fileExtension)); err != nil {
+			return err
+		}
+
+		jobs, err := o.BatchClient.Jobs(namespace).List(context.TODO(), metav1.ListOptions{})
+		if err != nil {
+			return err
+		}
+		if err := o.PrintObj(jobs, setupOutputWriter(o.OutputDir, o.Out, path.Join(namespace, "jobs"), fileExtension)); err != nil {
+			return err
+		}
+
+		cronjobs, err := o.BatchClient.CronJobs(namespace).List(context.TODO(), metav1.ListOptions{})
+		if err != nil {
+			return err
+		}
+		if err := o.PrintObj(cronjobs, setupOutputWriter(o.OutputDir, o.Out, path.Join(namespace, "cronjobs"), fileExtension)); err != nil {
+			return err
+		}
+
+		roles, err := o.RbacClient.Roles(namespace).List(context.TODO(), metav1.ListOptions{})
+		if err != nil {
+			return err
+		}
+		if err := o.PrintObj(roles, setupOutputWriter(o.OutputDir, o.Out, path.Join(namespace, "roles"), fileExtension)); err != nil {
+			return err
+		}
+
+		rolebindings, err := o.RbacClient.RoleBindings(namespace).List(context.TODO(), metav1.ListOptions{})
+		if err != nil {
+			return err
+		}
+		if err := o.PrintObj(rolebindings, setupOutputWriter(o.OutputDir, o.Out, path.Join(namespace, "rolebindings"), fileExtension)); err != nil {
 			return err
 		}
 

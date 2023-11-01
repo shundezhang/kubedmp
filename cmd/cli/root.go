@@ -46,7 +46,17 @@ var (
 		"ConfigMap":               {"cm", "configmap", "configmaps"},
 		"Service Account":         {"sa", "serviceaccount", "serviceaccounts"},
 		"Ingress":                 {"ing", "ingress", "ingresses"},
+		"Storage Class":           {"sc", "storageclass", "storageclasses"},
+		"Cluster Role":            {"clusterrole", "clusterroles"},
+		"Cluster Role Binding":    {"clusterrolebinding", "clusterrolebindings"},
+		"Endpoints":               {"ep", "endpoint", "endpoints"},
+		"Job":                     {"job", "jobs"},
+		"Cron Job":                {"cj", "cronjob", "cronjobs"},
+		"Role":                    {"role", "roles"},
+		"Role Binding":            {"rolebinding", "rolebindings"},
 	}
+
+	UnnamespacedTypes = []string{"Node", "Persistent Volume", "Storage Class", "Cluster Role", "Cluster Role Binding"}
 )
 
 const (
@@ -107,6 +117,13 @@ func hasType(resType string) bool {
 	log.Fatalf("%s is not a supported resource type.\n", resType)
 	return false
 
+}
+
+func inType(resType string, key string) bool {
+	if contains(SupportTypes[key], resType) {
+		return true
+	}
+	return false
 }
 
 func readFile(filePath string, pb ProcessBuffer) {

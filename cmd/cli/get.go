@@ -3,6 +3,7 @@ package cli
 import (
 	// "bufio"
 	"encoding/json"
+
 	// "fmt"
 	"log"
 	"os"
@@ -43,7 +44,8 @@ Prints a table of the most important information about resources of the specific
 		if !hasType(resType) {
 			return
 		}
-		if strings.HasPrefix(resType, "no") || resType == "pv" || resType == "persistentvolumes" {
+		if inType(resType, "Node") || inType(resType, "Persistent Volume") || inType(resType, "Storage Class") ||
+			inType(resType, "Cluster Role") || inType(resType, "Cluster Role Binding") {
 			resNamespace = ""
 		}
 		// fmt.Printf("In get: parsing dump file %s\n", dumpFile)
@@ -88,49 +90,37 @@ func processDoc(buffer string) {
 		return
 	}
 	// log.Print(resType, resNamespace, resName, result["kind"])
-	if (resType == "no" || resType == "node" || resType == "nodes") && result["kind"] == "NodeList" {
+	if (inType(resType, "Node") && result["kind"] == "NodeList") ||
+		(inType(resType, "Persistent Volume") && result["kind"] == "PersistentVolumeList") ||
+		(inType(resType, "Storage Class") && result["kind"] == "StorageClassList") ||
+		(inType(resType, "Cluster Role") && result["kind"] == "ClusterRoleList") ||
+		(inType(resType, "Cluster Role Binding") && result["kind"] == "ClusterRoleBindingList") {
 		for _, item := range result["items"].([]interface{}) {
-			node := item.(map[string]interface{})
-			metadata := node["metadata"].(map[string]interface{})
-			nodeName := metadata["name"].(string)
-			if resName != "" && nodeName != resName {
+			obj := item.(map[string]interface{})
+			metadata := obj["metadata"].(map[string]interface{})
+			objName := metadata["name"].(string)
+			if resName != "" && objName != resName {
 				continue
 			}
 			displayItems = append(displayItems, item)
 		}
-	} else if (resType == "pv" || resType == "persistentvolume" || resType == "persistentvolumes") && result["kind"] == "PersistentVolumeList" {
-		for _, item := range result["items"].([]interface{}) {
-			pv := item.(map[string]interface{})
-			metadata := pv["metadata"].(map[string]interface{})
-			pvName := metadata["name"].(string)
-			if resName != "" && pvName != resName {
-				continue
-			}
-			displayItems = append(displayItems, item)
-		}
-	} else if (resType == "po" || resType == "pod" || resType == "pods") && result["kind"] == "PodList" {
-		findItems(result["items"].([]interface{}))
-	} else if (resType == "svc" || resType == "service" || resType == "services") && result["kind"] == "ServiceList" {
-		findItems(result["items"].([]interface{}))
-	} else if (resType == "deploy" || resType == "deployment" || resType == "deployments") && result["kind"] == "DeploymentList" {
-		findItems(result["items"].([]interface{}))
-	} else if (resType == "ds" || resType == "daemonset" || resType == "daemonsets") && result["kind"] == "DaemonSetList" {
-		findItems(result["items"].([]interface{}))
-	} else if (resType == "rs" || resType == "replicaset" || resType == "replicasets") && result["kind"] == "ReplicaSetList" {
-		findItems(result["items"].([]interface{}))
-	} else if (resType == "sts" || resType == "statefulset" || resType == "statefulsets") && result["kind"] == "StatefulSetList" {
-		findItems(result["items"].([]interface{}))
-	} else if (resType == "cm" || resType == "configmap" || resType == "configmaps") && result["kind"] == "ConfigMapList" {
-		findItems(result["items"].([]interface{}))
-	} else if (resType == "secrets" || resType == "secret") && result["kind"] == "SecretList" {
-		findItems(result["items"].([]interface{}))
-	} else if (resType == "sa" || resType == "serviceaccounts" || resType == "serviceaccount") && result["kind"] == "ServiceAccountList" {
-		findItems(result["items"].([]interface{}))
-	} else if (resType == "ing" || resType == "ingress" || resType == "ingresses") && result["kind"] == "IngressList" {
-		findItems(result["items"].([]interface{}))
-	} else if (resType == "pvc" || resType == "persistentvolumeclaim" || resType == "persistentvolumeclaims") && result["kind"] == "PersistentVolumeClaimList" {
-		findItems(result["items"].([]interface{}))
-	} else if (resType == "event" || resType == "events") && result["kind"] == "EventList" {
+	} else if (inType(resType, "Pod") && result["kind"] == "PodList") ||
+		(inType(resType, "Service") && result["kind"] == "ServiceList") ||
+		(inType(resType, "Deployment") && result["kind"] == "DeploymentList") ||
+		(inType(resType, "DaemonSet") && result["kind"] == "DaemonSetList") ||
+		(inType(resType, "ReplicaSet") && result["kind"] == "ReplicaSetList") ||
+		(inType(resType, "StatefulSet") && result["kind"] == "StatefulSetList") ||
+		(inType(resType, "ConfigMap") && result["kind"] == "ConfigMapList") ||
+		(inType(resType, "Secret") && result["kind"] == "SecretList") ||
+		(inType(resType, "Service Account") && result["kind"] == "ServiceAccountList") ||
+		(inType(resType, "Ingress") && result["kind"] == "IngressList") ||
+		(inType(resType, "Persistent Volume Claim") && result["kind"] == "PersistentVolumeClaimList") ||
+		(inType(resType, "Event") && result["kind"] == "EventList") ||
+		(inType(resType, "Endpoints") && result["kind"] == "EndpointsList") ||
+		(inType(resType, "Job") && result["kind"] == "JobList") ||
+		(inType(resType, "Cron Job") && result["kind"] == "CronJobList") ||
+		(inType(resType, "Role") && result["kind"] == "RoleList") ||
+		(inType(resType, "Role Binding") && result["kind"] == "RoleBindingList") {
 		findItems(result["items"].([]interface{}))
 	}
 }
@@ -182,6 +172,22 @@ func printItems() {
 		prettyPrintServiceAccountList(displayItems)
 	case "ing", "ingress", "ingresses":
 		prettyPrintIngressList(displayItems)
+	case "sc", "storageclass", "storageclasses":
+		prettyPrintStorageClassList(displayItems)
+	case "clusterrole", "clusterroles":
+		prettyPrintClusterRoleList(displayItems)
+	case "clusterrolebinding", "clusterrolebindings":
+		prettyPrintClusterRoleBindingList(displayItems)
+	case "ep", "endpoint", "endpoints":
+		prettyPrintEndpointsList(displayItems)
+	case "job", "jobs":
+		prettyPrintJobList(displayItems)
+	case "cj", "cronjob", "cronjobs":
+		prettyPrintCronJobList(displayItems)
+	case "role", "roles":
+		prettyPrintRoleList(displayItems)
+	case "rolebinding", "rolebindings":
+		prettyPrintRoleBindingList(displayItems)
 	}
 }
 
@@ -223,7 +229,24 @@ func traverseDir() {
 		filename = "serviceaccounts"
 	case "ing", "ingress", "ingresses":
 		filename = "ingresses"
+	case "sc", "storageclass", "storageclasses":
+		filename = "scs"
+	case "clusterrole", "clusterroles":
+		filename = "clusterroles"
+	case "clusterrolebinding", "clusterrolebindings":
+		filename = "clusterrolebindings"
+	case "ep", "endpoint", "endpoints":
+		filename = "endpoints"
+	case "job", "jobs":
+		filename = "jobs"
+	case "cj", "cronjob", "cronjobs":
+		filename = "cronjobs"
+	case "role", "roles":
+		filename = "roles"
+	case "rolebinding", "rolebindings":
+		filename = "rolebindings"
 	}
+	// fmt.Println("filename: ", filename)
 	if allNamespaces && !strings.HasPrefix(resType, "no") {
 		subdirs, err1 := os.ReadDir(dumpDir)
 		if err1 != nil {
@@ -242,6 +265,7 @@ func traverseDir() {
 			log.Fatalf("namespace %v does not exist: %v", resNamespace, err1.Error())
 		}
 		itemFilename := filepath.Join(dumpDir, resNamespace, filename+"."+dumpFormat)
+		// fmt.Println("itemFilename: ", itemFilename)
 		readFile(itemFilename, processDoc)
 	}
 }

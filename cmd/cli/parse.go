@@ -15,6 +15,228 @@ import (
 
 type PickItem func(string, string, string, string) []interface{}
 
+func prettyPrintCronJobList(items []interface{}) {
+	writer := tabwriter.NewWriter(os.Stdout, 0, 8, 1, '\t', tabwriter.AlignRight)
+	fmt.Fprintln(writer, "NAMESPACE\tNAME\tSCHEDULE\tSUSPEND\tACTIVE\tLAST SCHEDULE\tAGE\tCONTAINERS\tIMAGES\tSELECTOR")
+	for _, item := range items {
+		// fmt.Println("item: ", reflect.TypeOf(item).String())
+		job := item.(map[string]interface{})
+		metadata := job["metadata"].(map[string]interface{})
+		spec := job["spec"].(map[string]interface{})
+		// fmt.Println("item: ", reflect.TypeOf(node["status"]).String())
+		jobTemplate := spec["jobTemplate"].(map[string]interface{})
+		jobTemplateSpec := jobTemplate["spec"].(map[string]interface{})
+		template := jobTemplateSpec["template"].(map[string]interface{})
+		templateSpec := template["spec"].(map[string]interface{})
+		status := job["status"].(map[string]interface{})
+
+		creationTimeStr := metadata["creationTimestamp"].(string)
+
+		lastScheduleTimeStr := status["lastScheduleTime"].(string)
+		lastSched := getAge(lastScheduleTimeStr)
+
+		selectorStr := "<none>"
+		selectorList := []string{}
+		if selector, ok := spec["selector"].(map[string]interface{}); ok {
+			if matchLabels, ok1 := selector["matchLabels"].(map[string]interface{}); ok1 {
+				for k, v := range matchLabels {
+					selectorList = append(selectorList, k+"="+v.(string))
+				}
+				selectorStr = strings.Join(selectorList, ",")
+			}
+		}
+		age := getAge(creationTimeStr)
+		imageList := []string{}
+		containerList := []string{}
+		containers := templateSpec["containers"].([]interface{})
+		for _, item1 := range containers {
+			cont := item1.(map[string]interface{})
+			containerList = append(containerList, cont["name"].(string))
+			imageList = append(imageList, cont["image"].(string))
+		}
+
+		active := 0
+		if activeList, ok := status["active"].([]interface{}); ok {
+			active = len(activeList)
+		}
+		fmt.Fprintf(writer, "%s\t%s\t%s\t%t\t%d\t%s\t%s\t%s\t%s\t%s\n", metadata["namespace"], metadata["name"], spec["schedule"], spec["suspend"], active, lastSched, age, strings.Join(containerList, ","), strings.Join(imageList, ","), selectorStr)
+	}
+	writer.Flush()
+
+}
+
+func prettyPrintJobList(items []interface{}) {
+	writer := tabwriter.NewWriter(os.Stdout, 0, 8, 1, '\t', tabwriter.AlignRight)
+	fmt.Fprintln(writer, "NAMESPACE\tNAME\tCOMPLETIONS\tDURATION\tAGE\tCONTAINERS\tIMAGES\tSELECTOR")
+	for _, item := range items {
+		// fmt.Println("item: ", reflect.TypeOf(item).String())
+		job := item.(map[string]interface{})
+		metadata := job["metadata"].(map[string]interface{})
+		spec := job["spec"].(map[string]interface{})
+		// fmt.Println("item: ", reflect.TypeOf(node["status"]).String())
+		template := spec["template"].(map[string]interface{})
+		templateSpec := template["spec"].(map[string]interface{})
+		status := job["status"].(map[string]interface{})
+		succeeded := "0"
+		if status["succeeded"] != nil {
+			succeeded = strconv.FormatInt(int64(status["succeeded"].(float64)), 10)
+		}
+		creationTimeStr := metadata["creationTimestamp"].(string)
+		startTimeStr := status["startTime"].(string)
+		duration := getAge(startTimeStr)
+
+		if status["completionTime"] != nil {
+			duration = getDuration(startTimeStr, status["completionTime"].(string))
+		}
+		selectorStr := "<none>"
+		selectorList := []string{}
+		if selector, ok := spec["selector"].(map[string]interface{}); ok {
+			if matchLabels, ok1 := selector["matchLabels"].(map[string]interface{}); ok1 {
+				for k, v := range matchLabels {
+					selectorList = append(selectorList, k+"="+v.(string))
+				}
+				selectorStr = strings.Join(selectorList, ",")
+			}
+		}
+		age := getAge(creationTimeStr)
+		imageList := []string{}
+		containerList := []string{}
+		containers := templateSpec["containers"].([]interface{})
+		for _, item1 := range containers {
+			cont := item1.(map[string]interface{})
+			containerList = append(containerList, cont["name"].(string))
+			imageList = append(imageList, cont["image"].(string))
+		}
+		completions := "0"
+		if spec["completions"] != nil {
+			completions = strconv.FormatInt(int64((spec["completions"].(float64))), 10)
+		}
+		fmt.Fprintf(writer, "%s\t%s\t%s/%s\t%s\t%s\t%s\t%s\t%s\n", metadata["namespace"], metadata["name"], succeeded, completions, duration, age, strings.Join(containerList, ","), strings.Join(imageList, ","), selectorStr)
+	}
+	writer.Flush()
+
+}
+
+func prettyPrintStorageClassList(items []interface{}) {
+	writer := tabwriter.NewWriter(os.Stdout, 0, 8, 1, '\t', tabwriter.AlignRight)
+	fmt.Fprintln(writer, "NAME\tPROVISIONER\tRECLAIMPOLICY\tVOLUMEBINDINGMODE\tALLOWVOLUMEEXPANSION\tAGE")
+	for _, item := range items {
+		// fmt.Println("item: ", reflect.TypeOf(item).String())
+		sc := item.(map[string]interface{})
+		metadata := sc["metadata"].(map[string]interface{})
+		creationTimeStr := metadata["creationTimestamp"].(string)
+		// fmt.Println("creationTimeStr: ", creationTimeStr)
+		age := getAge(creationTimeStr)
+		allowVolumeExpansion := false
+		if sc["allowVolumeExpansion"] != nil {
+			allowVolumeExpansion = sc["allowVolumeExpansion"].(bool)
+		}
+		fmt.Fprintf(writer, "%s\t%s\t%s\t%s\t%t\t%s\n", metadata["name"], sc["provisioner"], sc["reclaimPolicy"], sc["volumeBindingMode"], allowVolumeExpansion, age)
+	}
+	writer.Flush()
+
+}
+
+func prettyPrintClusterRoleList(items []interface{}) {
+	writer := tabwriter.NewWriter(os.Stdout, 0, 8, 1, '\t', tabwriter.AlignRight)
+	fmt.Fprintln(writer, "NAME\tCREATED AT")
+	for _, item := range items {
+		// fmt.Println("item: ", reflect.TypeOf(item).String())
+		cr := item.(map[string]interface{})
+		metadata := cr["metadata"].(map[string]interface{})
+		creationTimeStr := metadata["creationTimestamp"].(string)
+		// fmt.Println("creationTimeStr: ", creationTimeStr)
+
+		fmt.Fprintf(writer, "%s\t%s\n", metadata["name"], creationTimeStr)
+	}
+	writer.Flush()
+
+}
+
+func prettyPrintRoleList(items []interface{}) {
+	writer := tabwriter.NewWriter(os.Stdout, 0, 8, 1, '\t', tabwriter.AlignRight)
+	fmt.Fprintln(writer, "NAMESPACE\tNAME\tCREATED AT")
+	for _, item := range items {
+		// fmt.Println("item: ", reflect.TypeOf(item).String())
+		cr := item.(map[string]interface{})
+		metadata := cr["metadata"].(map[string]interface{})
+		creationTimeStr := metadata["creationTimestamp"].(string)
+		// fmt.Println("creationTimeStr: ", creationTimeStr)
+
+		fmt.Fprintf(writer, "%s\t%s\t%s\n", metadata["namespace"], metadata["name"], creationTimeStr)
+	}
+	writer.Flush()
+
+}
+
+func prettyPrintClusterRoleBindingList(items []interface{}) {
+	writer := tabwriter.NewWriter(os.Stdout, 0, 8, 1, '\t', tabwriter.AlignRight)
+	fmt.Fprintln(writer, "NAME\tROLE\tAGE\tUSERS\tGROUPS\tSERVICEACCOUNTS")
+	for _, item := range items {
+		// fmt.Println("item: ", reflect.TypeOf(item).String())
+		crb := item.(map[string]interface{})
+		metadata := crb["metadata"].(map[string]interface{})
+		creationTimeStr := metadata["creationTimestamp"].(string)
+		age := getAge(creationTimeStr)
+		// fmt.Println("creationTimeStr: ", creationTimeStr)
+		role := crb["roleRef"].(map[string]interface{})
+		user := ""
+		group := ""
+		sa := ""
+		if subjects, ok := crb["subjects"].([]interface{}); ok {
+			for _, item1 := range subjects {
+				sub := item1.(map[string]interface{})
+				if sub["kind"] == "ServiceAccount" {
+					sa += sub["namespace"].(string) + "/" + sub["name"].(string) + " "
+				}
+				if sub["kind"] == "Group" {
+					group += sub["name"].(string) + " "
+				}
+				if sub["kind"] == "User" {
+					user += sub["name"].(string) + " "
+				}
+			}
+		}
+		fmt.Fprintf(writer, "%s\t%s/%s\t%s\t%s\t%s\t%s\n", metadata["name"], role["kind"], role["name"], age, strings.Replace(strings.Trim(user, " "), " ", ",", -1), strings.Replace(strings.Trim(group, " "), " ", ",", -1), strings.Replace(strings.Trim(sa, " "), " ", ",", -1))
+	}
+	writer.Flush()
+
+}
+
+func prettyPrintRoleBindingList(items []interface{}) {
+	writer := tabwriter.NewWriter(os.Stdout, 0, 8, 1, '\t', tabwriter.AlignRight)
+	fmt.Fprintln(writer, "NAMESPACE\tNAME\tROLE\tAGE\tUSERS\tGROUPS\tSERVICEACCOUNTS")
+	for _, item := range items {
+		// fmt.Println("item: ", reflect.TypeOf(item).String())
+		crb := item.(map[string]interface{})
+		metadata := crb["metadata"].(map[string]interface{})
+		creationTimeStr := metadata["creationTimestamp"].(string)
+		age := getAge(creationTimeStr)
+		// fmt.Println("creationTimeStr: ", creationTimeStr)
+		role := crb["roleRef"].(map[string]interface{})
+		user := ""
+		group := ""
+		sa := ""
+		if subjects, ok := crb["subjects"].([]interface{}); ok {
+			for _, item1 := range subjects {
+				sub := item1.(map[string]interface{})
+				if sub["kind"] == "ServiceAccount" {
+					sa += sub["namespace"].(string) + "/" + sub["name"].(string) + " "
+				}
+				if sub["kind"] == "Group" {
+					group += sub["name"].(string) + " "
+				}
+				if sub["kind"] == "User" {
+					user += sub["name"].(string) + " "
+				}
+			}
+		}
+		fmt.Fprintf(writer, "%s\t%s\t%s/%s\t%s\t%s\t%s\t%s\n", metadata["namespace"], metadata["name"], role["kind"], role["name"], age, strings.Replace(strings.Trim(user, " "), " ", ",", -1), strings.Replace(strings.Trim(group, " "), " ", ",", -1), strings.Replace(strings.Trim(sa, " "), " ", ",", -1))
+	}
+	writer.Flush()
+
+}
+
 func prettyPrintNodeList(items []interface{}) {
 	writer := tabwriter.NewWriter(os.Stdout, 0, 8, 1, '\t', tabwriter.AlignRight)
 	fmt.Fprintln(writer, "NAME\tSTATUS\tROLES\tAGE\tVERSION\tINTERNAL-IP\tEXTERNAL-IP\tOS-IMAGE\tKERNEL-VERSION\tCONTAINER-RUNTIME")
@@ -23,7 +245,7 @@ func prettyPrintNodeList(items []interface{}) {
 		node := item.(map[string]interface{})
 		metadata := node["metadata"].(map[string]interface{})
 		nodeName := metadata["name"].(string)
-
+		spec := node["spec"].(map[string]interface{})
 		// fmt.Println("item: ", reflect.TypeOf(node["status"]).String())
 		status := node["status"].(map[string]interface{})
 		addresses := status["addresses"].([]interface{})
@@ -69,7 +291,10 @@ func prettyPrintNodeList(items []interface{}) {
 				state += cond["type"].(string) + " "
 			}
 		}
-		fmt.Fprintf(writer, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", nodeName, strings.Trim(state, " "), role, age, kubletVersion, ipaddress, extip, osImage, kernelVersion, containerRuntimeVersion)
+		if spec["unschedulable"] != nil && spec["unschedulable"].(bool) == true {
+			state += "SchedulingDisabled "
+		}
+		fmt.Fprintf(writer, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", nodeName, strings.Replace(strings.Trim(state, " "), " ", ",", -1), role, age, kubletVersion, ipaddress, extip, osImage, kernelVersion, containerRuntimeVersion)
 	}
 	writer.Flush()
 }
@@ -133,14 +358,18 @@ func prettyPrintServiceList(items []interface{}) {
 		// fmt.Println("creationTimeStr: ", creationTimeStr)
 		age := getAge(creationTimeStr)
 		extip := "<none>"
-		ports := spec["ports"].([]interface{})
-		portList := []string{}
-		for _, item1 := range ports {
-			port := item1.(map[string]interface{})
-			portList = append(portList, strconv.FormatInt(int64((port["port"].(float64))), 10)+"/"+port["protocol"].(string))
+		portString := ""
+		if spec["ports"] != nil {
+			ports := spec["ports"].([]interface{})
+			portList := []string{}
+			for _, item1 := range ports {
+				port := item1.(map[string]interface{})
+				portList = append(portList, strconv.FormatInt(int64((port["port"].(float64))), 10)+"/"+port["protocol"].(string))
+			}
+			portString = strings.Join(portList, ",")
 		}
 		// address := item.(map[string]interface{})["status"]["addresses"].(map[string]interface{})
-		fmt.Fprintf(writer, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n", metadata["namespace"], metadata["name"], spec["type"], spec["clusterIP"], extip, strings.Join(portList, ","), age)
+		fmt.Fprintf(writer, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n", metadata["namespace"], metadata["name"], spec["type"], spec["clusterIP"], extip, portString, age)
 	}
 	writer.Flush()
 }
@@ -195,10 +424,13 @@ func prettyPrintReplicaSetList(items []interface{}) {
 		replica := "0"
 		ready := "0"
 		avail := "0"
-		if status["replicas"].(float64) > 0 {
+		if status["replicas"] != nil && status["replicas"].(float64) > 0 {
 			replica = strconv.FormatInt(int64((status["replicas"].(float64))), 10)
+		}
+		if status["readyReplicas"] != nil && status["readyReplicas"].(float64) > 0 {
 			ready = strconv.FormatInt(int64((status["readyReplicas"].(float64))), 10)
-			// update := strconv.FormatInt(int64((status["updatedReplicas"].(float64))), 10)
+		}
+		if status["availableReplicas"] != nil && status["availableReplicas"].(float64) > 0 {
 			avail = strconv.FormatInt(int64((status["availableReplicas"].(float64))), 10)
 		}
 		// address := item.(map[string]interface{})["status"]["addresses"].(map[string]interface{})
@@ -424,6 +656,38 @@ func prettyPrintServiceAccountList(items []interface{}) {
 	writer.Flush()
 }
 
+func prettyPrintEndpointsList(items []interface{}) {
+	writer := tabwriter.NewWriter(os.Stdout, 0, 8, 1, '\t', tabwriter.AlignRight)
+	fmt.Fprintln(writer, "NAMESPACE\tNAME\tENDPOINTS\tAGE")
+	for _, item := range items {
+		ep := item.(map[string]interface{})
+		metadata := ep["metadata"].(map[string]interface{})
+		eps := "<none>"
+		if subsets, ok := ep["subsets"].([]interface{}); ok {
+			eps = ""
+			for _, item1 := range subsets {
+				subset := item1.(map[string]interface{})
+				adds := subset["addresses"].([]interface{})
+				ports := subset["ports"].([]interface{})
+				for _, item2 := range adds {
+					add := item2.(map[string]interface{})
+					for _, item3 := range ports {
+						port := item3.(map[string]interface{})
+						eps += add["ip"].(string) + ":" + strconv.FormatInt(int64((port["port"].(float64))), 10) + " "
+					}
+				}
+			}
+		}
+
+		creationTimeStr := metadata["creationTimestamp"].(string)
+		// fmt.Println("creationTimeStr: ", creationTimeStr)
+		age := getAge(creationTimeStr)
+
+		fmt.Fprintf(writer, "%s\t%s\t%v\t%s\n", metadata["namespace"], metadata["name"], strings.Replace(strings.Trim(eps, " "), " ", ",", -1), age)
+	}
+	writer.Flush()
+}
+
 func prettyPrintIngressList(items []interface{}) {
 	writer := tabwriter.NewWriter(os.Stdout, 0, 8, 1, '\t', tabwriter.AlignRight)
 	fmt.Fprintln(writer, "NAMESPACE\tNAME\tCLASS\tHOSTS\tADDRESS\tPORTS\tAGE")
@@ -482,17 +746,42 @@ func getAge(creationTimeStr string) string {
 	age := "0s"
 	if err == nil {
 		ageTime := time.Now().Sub(creationTime)
-		if ageTime.Hours() > 24 {
-			age = strconv.FormatInt(int64(ageTime.Hours()/24), 10) + "d"
-		} else if ageTime.Hours() < 24 && ageTime.Hours() > 0 {
-			age = strconv.FormatInt(int64(ageTime.Hours()), 10) + "h"
-		} else if ageTime.Hours() < 0 && ageTime.Minutes() > 0 {
-			age = strconv.FormatInt(int64(ageTime.Minutes()), 10) + "m"
-		} else if ageTime.Minutes() < 0 && ageTime.Seconds() > 0 {
-			age = strconv.FormatInt(int64(ageTime.Seconds()), 10) + "s"
-		}
+		// fmt.Println("ageTime: ", ageTime)
+		return getDisplayTime(ageTime)
 	} else {
 		fmt.Println("Error:", err)
 	}
 	return age
+}
+
+func getDuration(startTimeStr string, completionTimeStr string) string {
+	startTime, err := time.Parse("2006-01-02T15:04:05Z", startTimeStr)
+	completionTime, err1 := time.Parse("2006-01-02T15:04:05Z", completionTimeStr)
+	// fmt.Println("creationTimeStr: ", startTimeStr)
+	// fmt.Println("completionTimeStr: ", completionTimeStr)
+	duration := "0s"
+	if err == nil && err1 == nil {
+		durationTime := completionTime.Sub(startTime)
+		return getDisplayTime(durationTime)
+	} else {
+		fmt.Println("Error:", err, err1)
+	}
+	return duration
+}
+
+func getDisplayTime(durationTime time.Duration) string {
+	duration := "0s"
+	// fmt.Println("durationTime: ", durationTime.Hours())
+	// fmt.Println("durationTime: ", durationTime.Minutes())
+	// fmt.Println("durationTime: ", durationTime.Seconds())
+	if durationTime.Hours() > 24 {
+		duration = strconv.FormatInt(int64(durationTime.Hours()/24), 10) + "d"
+	} else if durationTime.Hours() < 24 && durationTime.Hours() > 1 {
+		duration = strconv.FormatInt(int64(durationTime.Hours()), 10) + "h"
+	} else if durationTime.Hours() <= 1 && durationTime.Minutes() >= 2 {
+		duration = strconv.FormatInt(int64(durationTime.Minutes()), 10) + "m"
+	} else if durationTime.Minutes() < 2 && durationTime.Seconds() > 0 {
+		duration = strconv.FormatInt(int64(durationTime.Seconds()), 10) + "s"
+	}
+	return duration
 }

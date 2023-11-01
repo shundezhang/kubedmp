@@ -51,6 +51,22 @@ func prettyPrint(buffer string) {
 			prettyPrintServiceAccountList(result["items"].([]interface{}))
 		case "IngressList":
 			prettyPrintIngressList(result["items"].([]interface{}))
+		case "StorageClassList":
+			prettyPrintStorageClassList(result["items"].([]interface{}))
+		case "ClusterRoleList":
+			prettyPrintClusterRoleList(result["items"].([]interface{}))
+		case "ClusterRoleBindingList":
+			prettyPrintClusterRoleBindingList(result["items"].([]interface{}))
+		case "EndpointsList":
+			prettyPrintEndpointsList(result["items"].([]interface{}))
+		case "JobList":
+			prettyPrintJobList(result["items"].([]interface{}))
+		case "CronJobList":
+			prettyPrintCronJobList(result["items"].([]interface{}))
+		case "RoleList":
+			prettyPrintRoleList(result["items"].([]interface{}))
+		case "RoleBindingList":
+			prettyPrintRoleBindingList(result["items"].([]interface{}))
 		}
 		fmt.Println()
 	}
@@ -80,6 +96,9 @@ var showCmd = &cobra.Command{
 			}
 			readFile(filepath.Join(dumpDir, "nodes."+dumpFormat), prettyPrint)
 			readFile(filepath.Join(dumpDir, "pvs."+dumpFormat), prettyPrint)
+			readFile(filepath.Join(dumpDir, "scs."+dumpFormat), prettyPrint)
+			readFile(filepath.Join(dumpDir, "clusterroles."+dumpFormat), prettyPrint)
+			readFile(filepath.Join(dumpDir, "clusterrolebindings."+dumpFormat), prettyPrint)
 			// fmt.Println("-------------")
 			for _, dir := range subdirs {
 				subdirInfo, _ := os.Stat(filepath.Join(dumpDir, dir.Name()))
@@ -99,6 +118,11 @@ var showCmd = &cobra.Command{
 				readFile(filepath.Join(dumpDir, dir.Name(), "secrets."+dumpFormat), prettyPrint)
 				readFile(filepath.Join(dumpDir, dir.Name(), "serviceaccounts."+dumpFormat), prettyPrint)
 				readFile(filepath.Join(dumpDir, dir.Name(), "ingresses."+dumpFormat), prettyPrint)
+				readFile(filepath.Join(dumpDir, dir.Name(), "endpoints."+dumpFormat), prettyPrint)
+				readFile(filepath.Join(dumpDir, dir.Name(), "jobs."+dumpFormat), prettyPrint)
+				readFile(filepath.Join(dumpDir, dir.Name(), "cronjobs."+dumpFormat), prettyPrint)
+				readFile(filepath.Join(dumpDir, dir.Name(), "roles."+dumpFormat), prettyPrint)
+				readFile(filepath.Join(dumpDir, dir.Name(), "rolebindings."+dumpFormat), prettyPrint)
 				// readFile(dumpDir, prettyPrint, "event", dir.Name(), "")
 				// fmt.Println("-------------")
 				// readFromDir(dumpDir, prettyPrint, "svc", dir.Name(), "")
