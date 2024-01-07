@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"os"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -54,66 +55,50 @@ var describeCmd = &cobra.Command{
 		resType = args[0]
 		resName = args[1]
 
-		if !hasType(resType) {
+		var err error
+		resKind, err = getKind(resType)
+		if err != nil {
+			log.Fatalf("%s is not a supported resource type.\n", resType)
 			return
+		}
+		if contains(UnnamespacedTypes, resKind) {
+			resNamespace = ""
 		}
 		filePath := dumpFile
 		if len(dumpDir) > 0 {
-			filename := ""
-			switch resType {
-			case "no", "node":
-				filename = "nodes"
-				resNamespace = ""
-			case "po", "pod":
-				filename = "pods"
-			case "svc", "service":
-				filename = "services"
-			case "deploy", "deployment":
-				filename = "deployments"
-			case "ds", "daemonset":
-				filename = "daemonsets"
-			case "rs", "replicaset":
-				filename = "replicasets"
-			case "sts", "statefulset":
-				filename = "statefulsets"
-			case "pvc", "persistentvolumeclaim":
-				filename = "pvcs"
-			case "event":
-				filename = "events"
-			case "pv", "persistentvolume":
-				filename = "pvs"
-				resNamespace = ""
-			case "cm", "configmap", "configmaps":
-				filename = "configmaps"
-			case "secret", "secrets":
-				filename = "secrets"
-			case "sa", "serviceaccount", "serviceaccounts":
-				filename = "serviceaccounts"
-			case "ing", "ingress", "ingresses":
-				filename = "ingresses"
-			case "sc", "storageclass", "storageclasses":
-				filename = "scs"
-				resNamespace = ""
-			case "clusterrole", "clusterroles":
-				filename = "clusterroles"
-				resNamespace = ""
-			case "clusterrolebinding", "clusterrolebindings":
-				filename = "clusterrolebindings"
-				resNamespace = ""
-			case "ep", "endpoint", "endpoints":
-				filename = "endpoints"
-			case "job", "jobs":
-				filename = "jobs"
-			case "cj", "cronjob", "cronjobs":
-				filename = "cronjobs"
-			case "role", "roles":
-				filename = "roles"
-			case "rolebinding", "rolebindings":
-				filename = "rolebindings"
+			dumpDirPath, _ := filepath.Abs(dumpDir)
+			// fmt.Println("fullPath: ", dumpDirPath)
+			filename := DumpFileNames[resKind]
+			if strings.Contains(dumpDirPath, "sos_commands") && strings.Contains(dumpDirPath, "kubernetes") {
+				subdirs, err1 := os.ReadDir(dumpDir)
+				if err1 != nil {
+					log.Fatalf("Error to open [dir=%v]: %v", dumpDir, err1.Error())
+				}
+				for _, dir := range subdirs {
+					if contains(UnnamespacedTypes, resKind) && strings.HasSuffix(dir.Name(), "_get_"+filename) {
+						filePath = filepath.Join(dumpDir, dir.Name())
+						break
+					}
+					if dir.IsDir() && dir.Name() == filename {
+						resFiles, err2 := os.ReadDir(filepath.Join(dumpDir, dir.Name()))
+						if err2 != nil {
+							log.Fatalf("Error to open [dir=%v]: %v", dir.Name(), err2.Error())
+						}
+						// fmt.Println("subdirInfo.Name(): ", subdirInfo.Name())
+						for _, resFile := range resFiles {
+							if strings.HasSuffix(resFile.Name(), "_--namespace_"+resNamespace+"_"+filename) {
+								filePath = filepath.Join(dumpDir, dir.Name(), resFile.Name())
+								break
+							}
+						}
+						break
+					}
+				}
+			} else {
+				filePath = filepath.Join(dumpDir, resNamespace, filename+"."+dumpFormat)
 			}
-			filePath = filepath.Join(dumpDir, resNamespace, filename+"."+dumpFormat)
 		}
-
+		// fmt.Println("filePath: ", filePath)
 		readFile(filePath, describeObject)
 
 	},
@@ -154,7 +139,7 @@ func describeObject(buffer string) {
 	// fmt.Println(result["kind"].(string))
 	if kind, ok := result["kind"].(string); ok {
 
-		if inType(resType, "Node") && kind == "NodeList" {
+		if inType(resType, "Node") && (kind == "NodeList" || kind == "List") {
 			var nodeList corev1.NodeList
 			err := json.Unmarshal([]byte(buffer), &nodeList)
 			if err != nil {
@@ -172,7 +157,7 @@ func describeObject(buffer string) {
 					break
 				}
 			}
-		} else if inType(resType, "Persistent Volume") && kind == "PersistentVolumeList" {
+		} else if inType(resType, "PersistentVolume") && (kind == "PersistentVolumeList" || kind == "List") {
 			var pvList corev1.PersistentVolumeList
 			err := json.Unmarshal([]byte(buffer), &pvList)
 			if err != nil {
@@ -188,7 +173,7 @@ func describeObject(buffer string) {
 					break
 				}
 			}
-		} else if inType(resType, "Storage Class") && kind == "StorageClassList" {
+		} else if inType(resType, "StorageClass") && (kind == "StorageClassList" || kind == "List") {
 			var scList storagev1.StorageClassList
 			err := json.Unmarshal([]byte(buffer), &scList)
 			if err != nil {
@@ -204,7 +189,7 @@ func describeObject(buffer string) {
 					break
 				}
 			}
-		} else if inType(resType, "Cluster Role") && kind == "ClusterRoleList" {
+		} else if inType(resType, "ClusterRole") && (kind == "ClusterRoleList" || kind == "List") {
 			var crList rbacv1.ClusterRoleList
 			err := json.Unmarshal([]byte(buffer), &crList)
 			if err != nil {
@@ -220,7 +205,7 @@ func describeObject(buffer string) {
 					break
 				}
 			}
-		} else if inType(resType, "Cluster Role Binding") && kind == "ClusterRoleBindingList" {
+		} else if inType(resType, "ClusterRoleBinding") && (kind == "ClusterRoleBindingList" || kind == "List") {
 			var crbList rbacv1.ClusterRoleBindingList
 			err := json.Unmarshal([]byte(buffer), &crbList)
 			if err != nil {
@@ -236,7 +221,7 @@ func describeObject(buffer string) {
 					break
 				}
 			}
-		} else if inType(resType, "Pod") && kind == "PodList" {
+		} else if inType(resType, "Pod") && (kind == "PodList" || kind == "List") {
 			var podList corev1.PodList
 			err := json.Unmarshal([]byte(buffer), &podList)
 			if err != nil {
@@ -252,7 +237,7 @@ func describeObject(buffer string) {
 					break
 				}
 			}
-		} else if inType(resType, "Service") && kind == "ServiceList" {
+		} else if inType(resType, "Service") && (kind == "ServiceList" || kind == "List") {
 			var svcList corev1.ServiceList
 			err := json.Unmarshal([]byte(buffer), &svcList)
 			if err != nil {
@@ -268,7 +253,7 @@ func describeObject(buffer string) {
 					break
 				}
 			}
-		} else if inType(resType, "Deployment") && kind == "DeploymentList" {
+		} else if inType(resType, "Deployment") && (kind == "DeploymentList" || kind == "List") {
 			var deployList appsv1.DeploymentList
 			err := json.Unmarshal([]byte(buffer), &deployList)
 			if err != nil {
@@ -284,7 +269,7 @@ func describeObject(buffer string) {
 					break
 				}
 			}
-		} else if inType(resType, "DaemonSet") && kind == "DaemonSetList" {
+		} else if inType(resType, "DaemonSet") && (kind == "DaemonSetList" || kind == "List") {
 			var daemonList appsv1.DaemonSetList
 			err := json.Unmarshal([]byte(buffer), &daemonList)
 			if err != nil {
@@ -300,7 +285,7 @@ func describeObject(buffer string) {
 					break
 				}
 			}
-		} else if inType(resType, "ReplicaSet") && kind == "ReplicaSetList" {
+		} else if inType(resType, "ReplicaSet") && (kind == "ReplicaSetList" || kind == "List") {
 			var replicaList appsv1.ReplicaSetList
 			err := json.Unmarshal([]byte(buffer), &replicaList)
 			if err != nil {
@@ -316,7 +301,7 @@ func describeObject(buffer string) {
 					break
 				}
 			}
-		} else if inType(resType, "StatefulSet") && kind == "StatefulSetList" {
+		} else if inType(resType, "StatefulSet") && (kind == "StatefulSetList" || kind == "List") {
 			var stsList appsv1.StatefulSetList
 			err := json.Unmarshal([]byte(buffer), &stsList)
 			if err != nil {
@@ -332,7 +317,7 @@ func describeObject(buffer string) {
 					break
 				}
 			}
-		} else if inType(resType, "Persistent Volume Claim") && kind == "PersistentVolumeClaimList" {
+		} else if inType(resType, "PersistentVolumeClaim") && (kind == "PersistentVolumeClaimList" || kind == "List") {
 			var pvcList corev1.PersistentVolumeClaimList
 			err := json.Unmarshal([]byte(buffer), &pvcList)
 			if err != nil {
@@ -348,7 +333,7 @@ func describeObject(buffer string) {
 					break
 				}
 			}
-		} else if inType(resType, "ConfigMap") && kind == "ConfigMapList" {
+		} else if inType(resType, "ConfigMap") && (kind == "ConfigMapList" || kind == "List") {
 			var cmList corev1.ConfigMapList
 			err := json.Unmarshal([]byte(buffer), &cmList)
 			if err != nil {
@@ -364,7 +349,7 @@ func describeObject(buffer string) {
 					break
 				}
 			}
-		} else if inType(resType, "Secret") && kind == "SecretList" {
+		} else if inType(resType, "Secret") && (kind == "SecretList" || kind == "List") {
 			var secretList corev1.SecretList
 			err := json.Unmarshal([]byte(buffer), &secretList)
 			if err != nil {
@@ -380,7 +365,7 @@ func describeObject(buffer string) {
 					break
 				}
 			}
-		} else if inType(resType, "Service Account") && kind == "ServiceAccountList" {
+		} else if inType(resType, "ServiceAccount") && (kind == "ServiceAccountList" || kind == "List") {
 			var saList corev1.ServiceAccountList
 			err := json.Unmarshal([]byte(buffer), &saList)
 			if err != nil {
@@ -396,7 +381,7 @@ func describeObject(buffer string) {
 					break
 				}
 			}
-		} else if inType(resType, "Ingress") && kind == "IngressList" {
+		} else if inType(resType, "Ingress") && (kind == "IngressList" || kind == "List") {
 			var ingList networkingv1.IngressList
 			err := json.Unmarshal([]byte(buffer), &ingList)
 			if err != nil {
@@ -412,7 +397,7 @@ func describeObject(buffer string) {
 					break
 				}
 			}
-		} else if inType(resType, "Endpoints") && kind == "EndpointsList" {
+		} else if inType(resType, "Endpoints") && (kind == "EndpointsList" || kind == "List") {
 			var epList corev1.EndpointsList
 			err := json.Unmarshal([]byte(buffer), &epList)
 			if err != nil {
@@ -428,7 +413,7 @@ func describeObject(buffer string) {
 					break
 				}
 			}
-		} else if inType(resType, "Job") && kind == "JobList" {
+		} else if inType(resType, "Job") && (kind == "JobList" || kind == "List") {
 			var jobList batchv1.JobList
 			err := json.Unmarshal([]byte(buffer), &jobList)
 			if err != nil {
@@ -444,7 +429,7 @@ func describeObject(buffer string) {
 					break
 				}
 			}
-		} else if inType(resType, "Cron Job") && kind == "CronJobList" {
+		} else if inType(resType, "CronJob") && (kind == "CronJobList" || kind == "List") {
 			var jobList batchv1.CronJobList
 			err := json.Unmarshal([]byte(buffer), &jobList)
 			if err != nil {
@@ -460,7 +445,7 @@ func describeObject(buffer string) {
 					break
 				}
 			}
-		} else if inType(resType, "Role") && kind == "RoleList" {
+		} else if inType(resType, "Role") && (kind == "RoleList" || kind == "List") {
 			var roleList rbacv1.RoleList
 			err := json.Unmarshal([]byte(buffer), &roleList)
 			if err != nil {
@@ -476,7 +461,7 @@ func describeObject(buffer string) {
 					break
 				}
 			}
-		} else if inType(resType, "Role Binding") && kind == "RoleBindingList" {
+		} else if inType(resType, "RoleBinding") && (kind == "RoleBindingList" || kind == "List") {
 			var rbList rbacv1.RoleBindingList
 			err := json.Unmarshal([]byte(buffer), &rbList)
 			if err != nil {

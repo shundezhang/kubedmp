@@ -41,11 +41,13 @@ Prints a table of the most important information about resources of the specific
 		if len(args) > 1 {
 			resName = args[1]
 		}
-		if !hasType(resType) {
+		var err error
+		resKind, err = getKind(resType)
+		if err != nil {
+			log.Fatalf("%s is not a supported resource type.\n", resType)
 			return
 		}
-		if inType(resType, "Node") || inType(resType, "Persistent Volume") || inType(resType, "Storage Class") ||
-			inType(resType, "Cluster Role") || inType(resType, "Cluster Role Binding") {
+		if contains(UnnamespacedTypes, resKind) {
 			resNamespace = ""
 		}
 		// fmt.Printf("In get: parsing dump file %s\n", dumpFile)
@@ -67,15 +69,6 @@ func init() {
 	getCmd.PersistentFlags().StringVarP(&dumpDir, dumpDirFlag, "d", "", "Path to dump directory")
 }
 
-func contains(s []string, e string) bool {
-	for _, a := range s {
-		if a == e {
-			return true
-		}
-	}
-	return false
-}
-
 func processDoc(buffer string) {
 	var result map[string]interface{}
 	// fmt.Println(buffer)
@@ -90,13 +83,13 @@ func processDoc(buffer string) {
 		return
 	}
 	// log.Print(resType, resNamespace, resName, result["kind"])
-	if (inType(resType, "Node") && result["kind"] == "NodeList") ||
-		(inType(resType, "Persistent Volume") && result["kind"] == "PersistentVolumeList") ||
-		(inType(resType, "Storage Class") && result["kind"] == "StorageClassList") ||
-		(inType(resType, "Cluster Role") && result["kind"] == "ClusterRoleList") ||
-		(inType(resType, "Cluster Role Binding") && result["kind"] == "ClusterRoleBindingList") {
+	if result["kind"] == "List" {
 		for _, item := range result["items"].([]interface{}) {
 			obj := item.(map[string]interface{})
+			kind := obj["kind"]
+			if kind != resKind {
+				continue
+			}
 			metadata := obj["metadata"].(map[string]interface{})
 			objName := metadata["name"].(string)
 			if resName != "" && objName != resName {
@@ -104,24 +97,21 @@ func processDoc(buffer string) {
 			}
 			displayItems = append(displayItems, item)
 		}
-	} else if (inType(resType, "Pod") && result["kind"] == "PodList") ||
-		(inType(resType, "Service") && result["kind"] == "ServiceList") ||
-		(inType(resType, "Deployment") && result["kind"] == "DeploymentList") ||
-		(inType(resType, "DaemonSet") && result["kind"] == "DaemonSetList") ||
-		(inType(resType, "ReplicaSet") && result["kind"] == "ReplicaSetList") ||
-		(inType(resType, "StatefulSet") && result["kind"] == "StatefulSetList") ||
-		(inType(resType, "ConfigMap") && result["kind"] == "ConfigMapList") ||
-		(inType(resType, "Secret") && result["kind"] == "SecretList") ||
-		(inType(resType, "Service Account") && result["kind"] == "ServiceAccountList") ||
-		(inType(resType, "Ingress") && result["kind"] == "IngressList") ||
-		(inType(resType, "Persistent Volume Claim") && result["kind"] == "PersistentVolumeClaimList") ||
-		(inType(resType, "Event") && result["kind"] == "EventList") ||
-		(inType(resType, "Endpoints") && result["kind"] == "EndpointsList") ||
-		(inType(resType, "Job") && result["kind"] == "JobList") ||
-		(inType(resType, "Cron Job") && result["kind"] == "CronJobList") ||
-		(inType(resType, "Role") && result["kind"] == "RoleList") ||
-		(inType(resType, "Role Binding") && result["kind"] == "RoleBindingList") {
-		findItems(result["items"].([]interface{}))
+
+	} else if resKind == result["kind"].(string)[0:len(result["kind"].(string))-4] {
+		if contains(UnnamespacedTypes, resKind) {
+			for _, item := range result["items"].([]interface{}) {
+				obj := item.(map[string]interface{})
+				metadata := obj["metadata"].(map[string]interface{})
+				objName := metadata["name"].(string)
+				if resName != "" && objName != resName {
+					continue
+				}
+				displayItems = append(displayItems, item)
+			}
+		} else {
+			findItems(result["items"].([]interface{}))
+		}
 	}
 }
 
@@ -199,73 +189,63 @@ func traverseDir() {
 	if !dirInfo.IsDir() {
 		log.Fatalf("Path (%v) is not a dir.", dumpDir)
 	}
-	filename := ""
-	switch resType {
-	case "no", "node", "nodes":
-		filename = "nodes"
-	case "po", "pod", "pods":
-		filename = "pods"
-	case "svc", "service", "services":
-		filename = "services"
-	case "deploy", "deployment", "deployments":
-		filename = "deployments"
-	case "ds", "daemonsets", "daemonset":
-		filename = "daemonsets"
-	case "rs", "replicasets", "replicaset":
-		filename = "replicasets"
-	case "sts", "statefulsets", "statefulset":
-		filename = "statefulsets"
-	case "event", "events":
-		filename = "events"
-	case "pv", "persistentvolume", "persistentvolumes":
-		filename = "pvs"
-	case "pvc", "persistentvolumeclaim", "persistentvolumeclaims":
-		filename = "pvcs"
-	case "cm", "configmap", "configmaps":
-		filename = "configmaps"
-	case "secret", "secrets":
-		filename = "secrets"
-	case "sa", "serviceaccount", "serviceaccounts":
-		filename = "serviceaccounts"
-	case "ing", "ingress", "ingresses":
-		filename = "ingresses"
-	case "sc", "storageclass", "storageclasses":
-		filename = "scs"
-	case "clusterrole", "clusterroles":
-		filename = "clusterroles"
-	case "clusterrolebinding", "clusterrolebindings":
-		filename = "clusterrolebindings"
-	case "ep", "endpoint", "endpoints":
-		filename = "endpoints"
-	case "job", "jobs":
-		filename = "jobs"
-	case "cj", "cronjob", "cronjobs":
-		filename = "cronjobs"
-	case "role", "roles":
-		filename = "roles"
-	case "rolebinding", "rolebindings":
-		filename = "rolebindings"
-	}
+	filename := DumpFileNames[resKind]
 	// fmt.Println("filename: ", filename)
-	if allNamespaces && !strings.HasPrefix(resType, "no") {
+	dumpDirPath, _ := filepath.Abs(dumpDir)
+	// fmt.Println("fullPath: ", dumpDirPath)
+	if strings.Contains(dumpDirPath, "sos_commands") && strings.Contains(dumpDirPath, "kubernetes") {
 		subdirs, err1 := os.ReadDir(dumpDir)
 		if err1 != nil {
 			log.Fatalf("Error to open [dir=%v]: %v", dumpDir, err1.Error())
 		}
 		for _, dir := range subdirs {
-			subdirInfo, _ := os.Stat(filepath.Join(dumpDir, dir.Name()))
-			if !subdirInfo.IsDir() {
-				continue
+			// fmt.Println("dir: ", dir)
+			// subdirInfo, _ := os.Stat(filepath.Join(dumpDir, dir.Name()))
+			// fmt.Println("subdirInfo.Name(): ", subdirInfo.Name())
+			// fmt.Println("subdirInfo.IsDir(): ", subdirInfo.IsDir())
+			// fmt.Println("!contains(UnnamespacedTypes, resKind): ", !contains(UnnamespacedTypes, resKind))
+			// fmt.Println("subdirInfo.Name() == filename: ", subdirInfo.Name() == filename)
+			if dir.IsDir() && !contains(UnnamespacedTypes, resKind) && dir.Name() == filename {
+				resFiles, err2 := os.ReadDir(filepath.Join(dumpDir, dir.Name()))
+				if err2 != nil {
+					log.Fatalf("Error to open [dir=%v]: %v", dir.Name(), err2.Error())
+				}
+				// fmt.Println("subdirInfo.Name(): ", subdirInfo.Name())
+				for _, resFile := range resFiles {
+					if allNamespaces || (!allNamespaces && strings.HasSuffix(resFile.Name(), "_--namespace_"+resNamespace+"_"+filename)) {
+						itemFilename := filepath.Join(dumpDir, dir.Name(), resFile.Name())
+						// fmt.Println("itemFilename: ", itemFilename)
+						readFile(itemFilename, processDoc)
+					}
+				}
+			} else if !dir.IsDir() && strings.HasSuffix(filepath.Base(dir.Name()), filename) {
+				itemFilename := filepath.Join(dumpDir, dir.Name())
+				// fmt.Println("itemFilename: ", itemFilename)
+				readFile(itemFilename, processDoc)
 			}
-			itemFilename := filepath.Join(dumpDir, dir.Name(), filename+"."+dumpFormat)
-			readFile(itemFilename, processDoc)
 		}
 	} else {
-		if _, err1 := os.Stat(filepath.Join(dumpDir, resNamespace)); os.IsNotExist(err1) {
-			log.Fatalf("namespace %v does not exist: %v", resNamespace, err1.Error())
+		// fmt.Println("filename: ", filename)
+		if allNamespaces && !strings.HasPrefix(resType, "no") {
+			subdirs, err1 := os.ReadDir(dumpDir)
+			if err1 != nil {
+				log.Fatalf("Error to open [dir=%v]: %v", dumpDir, err1.Error())
+			}
+			for _, dir := range subdirs {
+				subdirInfo, _ := os.Stat(filepath.Join(dumpDir, dir.Name()))
+				if !subdirInfo.IsDir() {
+					continue
+				}
+				itemFilename := filepath.Join(dumpDir, dir.Name(), filename+"."+dumpFormat)
+				readFile(itemFilename, processDoc)
+			}
+		} else {
+			if _, err1 := os.Stat(filepath.Join(dumpDir, resNamespace)); os.IsNotExist(err1) {
+				log.Fatalf("namespace %v does not exist: %v", resNamespace, err1.Error())
+			}
+			itemFilename := filepath.Join(dumpDir, resNamespace, filename+"."+dumpFormat)
+			// fmt.Println("itemFilename: ", itemFilename)
+			readFile(itemFilename, processDoc)
 		}
-		itemFilename := filepath.Join(dumpDir, resNamespace, filename+"."+dumpFormat)
-		// fmt.Println("itemFilename: ", itemFilename)
-		readFile(itemFilename, processDoc)
 	}
 }

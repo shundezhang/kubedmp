@@ -221,7 +221,7 @@ func (o *ExtraInfoDumpOptions) runExtra() error {
 		if err != nil {
 			return err
 		}
-		if err := o.PrintObj(pvcs, setupOutputWriter(o.OutputDir, o.Out, path.Join(namespace, "pvcs"), fileExtension)); err != nil {
+		if err := o.PrintObj(pvcs, setupOutputWriter(o.OutputDir, o.Out, path.Join(namespace, "pvc"), fileExtension)); err != nil {
 			return err
 		}
 

@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -30,33 +31,59 @@ var (
 	resName       string
 	resContainer  string
 	allNamespaces bool
+	resKind       string
 
 	SupportTypes = map[string][]string{
-		"Node":                    {"no", "node", "nodes"},
-		"Pod":                     {"po", "pod", "pods"},
-		"Service":                 {"svc", "service", "services"},
-		"Deployment":              {"deploy", "deployment", "deployments"},
-		"DaemonSet":               {"ds", "daemonset", "daemonsets"},
-		"ReplicaSet":              {"rs", "replicaset", "replicasets"},
-		"Event":                   {"event", "events"},
-		"Persistent Volume":       {"pv", "persistentvolumes"},
-		"Persistent Volume Claim": {"pvc", "persistentvolumeclaim", "persistentvolumeclaims"},
-		"StatefulSet":             {"sts", "statefulset", "statefulsets"},
-		"Secret":                  {"secrets", "secret"},
-		"ConfigMap":               {"cm", "configmap", "configmaps"},
-		"Service Account":         {"sa", "serviceaccount", "serviceaccounts"},
-		"Ingress":                 {"ing", "ingress", "ingresses"},
-		"Storage Class":           {"sc", "storageclass", "storageclasses"},
-		"Cluster Role":            {"clusterrole", "clusterroles"},
-		"Cluster Role Binding":    {"clusterrolebinding", "clusterrolebindings"},
-		"Endpoints":               {"ep", "endpoint", "endpoints"},
-		"Job":                     {"job", "jobs"},
-		"Cron Job":                {"cj", "cronjob", "cronjobs"},
-		"Role":                    {"role", "roles"},
-		"Role Binding":            {"rolebinding", "rolebindings"},
+		"Node":                  {"no", "node", "nodes"},
+		"Pod":                   {"po", "pod", "pods"},
+		"Service":               {"svc", "service", "services"},
+		"Deployment":            {"deploy", "deployment", "deployments"},
+		"DaemonSet":             {"ds", "daemonset", "daemonsets"},
+		"ReplicaSet":            {"rs", "replicaset", "replicasets"},
+		"Event":                 {"event", "events"},
+		"PersistentVolume":      {"pv", "persistentvolumes"},
+		"PersistentVolumeClaim": {"pvc", "persistentvolumeclaim", "persistentvolumeclaims"},
+		"StatefulSet":           {"sts", "statefulset", "statefulsets"},
+		"Secret":                {"secrets", "secret"},
+		"ConfigMap":             {"cm", "configmap", "configmaps"},
+		"ServiceAccount":        {"sa", "serviceaccount", "serviceaccounts"},
+		"Ingress":               {"ing", "ingress", "ingresses"},
+		"StorageClass":          {"sc", "storageclass", "storageclasses"},
+		"ClusterRole":           {"clusterrole", "clusterroles"},
+		"ClusterRoleBinding":    {"clusterrolebinding", "clusterrolebindings"},
+		"Endpoints":             {"ep", "endpoint", "endpoints"},
+		"Job":                   {"job", "jobs"},
+		"CronJob":               {"cj", "cronjob", "cronjobs"},
+		"Role":                  {"role", "roles"},
+		"RoleBinding":           {"rolebinding", "rolebindings"},
 	}
 
-	UnnamespacedTypes = []string{"Node", "Persistent Volume", "Storage Class", "Cluster Role", "Cluster Role Binding"}
+	DumpFileNames = map[string]string{
+		"Node":                  "nodes",
+		"Pod":                   "pods",
+		"Service":               "services",
+		"Deployment":            "deployments",
+		"DaemonSet":             "daemonsets",
+		"ReplicaSet":            "replicasets",
+		"Event":                 "events",
+		"PersistentVolume":      "pvs",
+		"PersistentVolumeClaim": "pvc",
+		"StatefulSet":           "statefulsets",
+		"Secret":                "secrets",
+		"ConfigMap":             "configmaps",
+		"ServiceAccount":        "serviceaccounts",
+		"Ingress":               "ingresses",
+		"StorageClass":          "scs",
+		"ClusterRole":           "clusterroles",
+		"ClusterRoleBinding":    "clusterrolebindings",
+		"Endpoints":             "endpoints",
+		"Job":                   "jobs",
+		"CronJob":               "cronjobs",
+		"Role":                  "roles",
+		"RoleBinding":           "rolebindings",
+	}
+
+	UnnamespacedTypes = []string{"Node", "PersistentVolume", "StorageClass", "ClusterRole", "ClusterRoleBinding"}
 )
 
 const (
@@ -122,6 +149,25 @@ func hasType(resType string) bool {
 func inType(resType string, key string) bool {
 	if contains(SupportTypes[key], resType) {
 		return true
+	}
+	return false
+}
+
+func getKind(resType string) (string, error) {
+	for kind, types := range SupportTypes {
+		if contains(types, resType) {
+			return kind, nil
+		}
+	}
+
+	return "", errors.New("resource type not supported")
+}
+
+func contains(s []string, e string) bool {
+	for _, a := range s {
+		if a == e {
+			return true
+		}
 	}
 	return false
 }
