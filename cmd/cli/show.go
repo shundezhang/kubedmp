@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/spf13/cobra"
 )
@@ -19,10 +20,14 @@ func prettyPrint(buffer string) {
 		return
 	}
 	// fmt.Println("items: ", reflect.TypeOf(result["items"]).String())
-	if result["kind"] != nil && len(result["items"].([]interface{})) > 0 {
-		fmt.Println("Kind: ", result["kind"])
+	kind := result["kind"]
+	if result["kind"] == "List" {
+		kind = resKind + "List"
+	}
+	if kind != nil && len(result["items"].([]interface{})) > 0 {
+		fmt.Println("Kind: ", kind)
 		fmt.Println("================================================")
-		switch result["kind"] {
+		switch kind {
 		case "NodeList":
 			prettyPrintNodeList(result["items"].([]interface{}))
 		case "PodList":
@@ -94,47 +99,82 @@ var showCmd = &cobra.Command{
 			if err1 != nil {
 				log.Fatalf("Error to open [dir=%v]: %v", dumpDir, err1.Error())
 			}
-			readFile(filepath.Join(dumpDir, "nodes."+dumpFormat), prettyPrint)
-			readFile(filepath.Join(dumpDir, "pvs."+dumpFormat), prettyPrint)
-			readFile(filepath.Join(dumpDir, "scs."+dumpFormat), prettyPrint)
-			readFile(filepath.Join(dumpDir, "clusterroles."+dumpFormat), prettyPrint)
-			readFile(filepath.Join(dumpDir, "clusterrolebindings."+dumpFormat), prettyPrint)
-			// fmt.Println("-------------")
-			for _, dir := range subdirs {
-				subdirInfo, _ := os.Stat(filepath.Join(dumpDir, dir.Name()))
-				if !subdirInfo.IsDir() {
-					continue
+
+			dumpDirPath, _ := filepath.Abs(dumpDir)
+
+			if strings.Contains(dumpDirPath, "sos_commands") && strings.Contains(dumpDirPath, "kubernetes") {
+				resNamespace = ""
+				subdirs, err1 := os.ReadDir(dumpDir)
+				if err1 != nil {
+					log.Fatalf("Error to open [dir=%v]: %v", dumpDir, err1.Error())
 				}
-				// fmt.Println("Showing namespace:", dir.Name())
-				readFile(filepath.Join(dumpDir, dir.Name(), "events."+dumpFormat), prettyPrint)
-				readFile(filepath.Join(dumpDir, dir.Name(), "services."+dumpFormat), prettyPrint)
-				readFile(filepath.Join(dumpDir, dir.Name(), "daemonsets."+dumpFormat), prettyPrint)
-				readFile(filepath.Join(dumpDir, dir.Name(), "deployments."+dumpFormat), prettyPrint)
-				readFile(filepath.Join(dumpDir, dir.Name(), "replicasets."+dumpFormat), prettyPrint)
-				readFile(filepath.Join(dumpDir, dir.Name(), "statefulsets."+dumpFormat), prettyPrint)
-				readFile(filepath.Join(dumpDir, dir.Name(), "pods."+dumpFormat), prettyPrint)
-				readFile(filepath.Join(dumpDir, dir.Name(), "pvcs."+dumpFormat), prettyPrint)
-				readFile(filepath.Join(dumpDir, dir.Name(), "configmaps."+dumpFormat), prettyPrint)
-				readFile(filepath.Join(dumpDir, dir.Name(), "secrets."+dumpFormat), prettyPrint)
-				readFile(filepath.Join(dumpDir, dir.Name(), "serviceaccounts."+dumpFormat), prettyPrint)
-				readFile(filepath.Join(dumpDir, dir.Name(), "ingresses."+dumpFormat), prettyPrint)
-				readFile(filepath.Join(dumpDir, dir.Name(), "endpoints."+dumpFormat), prettyPrint)
-				readFile(filepath.Join(dumpDir, dir.Name(), "jobs."+dumpFormat), prettyPrint)
-				readFile(filepath.Join(dumpDir, dir.Name(), "cronjobs."+dumpFormat), prettyPrint)
-				readFile(filepath.Join(dumpDir, dir.Name(), "roles."+dumpFormat), prettyPrint)
-				readFile(filepath.Join(dumpDir, dir.Name(), "rolebindings."+dumpFormat), prettyPrint)
-				// readFile(dumpDir, prettyPrint, "event", dir.Name(), "")
+				for _, dir := range subdirs {
+					if dir.IsDir() && (dir.Name() == "pods" || dir.Name() == "pvc" || dir.Name() == "services" ||
+						dir.Name() == "deployments" || dir.Name() == "ingresses") {
+						resFiles, err2 := os.ReadDir(filepath.Join(dumpDir, dir.Name()))
+						resKind, _ = getKind(dir.Name())
+						resType = dir.Name()
+						if err2 != nil {
+							log.Fatalf("Error to open [dir=%v]: %v", dir.Name(), err2.Error())
+						}
+						// fmt.Println("dir.Name(): ", dir.Name())
+						// fmt.Println("resKind: ", resKind)
+						for _, resFile := range resFiles {
+							itemFilename := filepath.Join(dumpDir, dir.Name(), resFile.Name())
+							// fmt.Println("itemFilename: ", itemFilename)
+							readFile(itemFilename, prettyPrint)
+						}
+					} else if !dir.IsDir() && strings.HasSuffix(filepath.Base(dir.Name()), "_get_pv") {
+						// fmt.Println("kind: ", dir.Name()[strings.LastIndex(dir.Name(), "_"):])
+						resKind, _ = getKind(dir.Name()[strings.LastIndex(dir.Name(), "_"):])
+						itemFilename := filepath.Join(dumpDir, dir.Name())
+						// fmt.Println("itemFilename: ", itemFilename)
+						readFile(itemFilename, prettyPrint)
+					}
+				}
+			} else {
+				readFile(filepath.Join(dumpDir, "nodes."+dumpFormat), prettyPrint)
+				readFile(filepath.Join(dumpDir, "pvs."+dumpFormat), prettyPrint)
+				readFile(filepath.Join(dumpDir, "scs."+dumpFormat), prettyPrint)
+				readFile(filepath.Join(dumpDir, "clusterroles."+dumpFormat), prettyPrint)
+				readFile(filepath.Join(dumpDir, "clusterrolebindings."+dumpFormat), prettyPrint)
 				// fmt.Println("-------------")
-				// readFromDir(dumpDir, prettyPrint, "svc", dir.Name(), "")
-				// fmt.Println("-------------")
-				// readFromDir(dumpDir, prettyPrint, "ds", dir.Name(), "")
-				// fmt.Println("-------------")
-				// readFromDir(dumpDir, prettyPrint, "deploy", dir.Name(), "")
-				// fmt.Println("-------------")
-				// readFromDir(dumpDir, prettyPrint, "rs", dir.Name(), "")
-				// fmt.Println("-------------")
-				// readFromDir(dumpDir, prettyPrint, "po", dir.Name(), "")
-				// fmt.Println("-------------")
+				for _, dir := range subdirs {
+					subdirInfo, _ := os.Stat(filepath.Join(dumpDir, dir.Name()))
+					if !subdirInfo.IsDir() {
+						continue
+					}
+					// fmt.Println("Showing namespace:", dir.Name())
+					readFile(filepath.Join(dumpDir, dir.Name(), "events."+dumpFormat), prettyPrint)
+					readFile(filepath.Join(dumpDir, dir.Name(), "services."+dumpFormat), prettyPrint)
+					readFile(filepath.Join(dumpDir, dir.Name(), "daemonsets."+dumpFormat), prettyPrint)
+					readFile(filepath.Join(dumpDir, dir.Name(), "deployments."+dumpFormat), prettyPrint)
+					readFile(filepath.Join(dumpDir, dir.Name(), "replicasets."+dumpFormat), prettyPrint)
+					readFile(filepath.Join(dumpDir, dir.Name(), "statefulsets."+dumpFormat), prettyPrint)
+					readFile(filepath.Join(dumpDir, dir.Name(), "pods."+dumpFormat), prettyPrint)
+					readFile(filepath.Join(dumpDir, dir.Name(), "pvcs."+dumpFormat), prettyPrint)
+					readFile(filepath.Join(dumpDir, dir.Name(), "configmaps."+dumpFormat), prettyPrint)
+					readFile(filepath.Join(dumpDir, dir.Name(), "secrets."+dumpFormat), prettyPrint)
+					readFile(filepath.Join(dumpDir, dir.Name(), "serviceaccounts."+dumpFormat), prettyPrint)
+					readFile(filepath.Join(dumpDir, dir.Name(), "ingresses."+dumpFormat), prettyPrint)
+					readFile(filepath.Join(dumpDir, dir.Name(), "endpoints."+dumpFormat), prettyPrint)
+					readFile(filepath.Join(dumpDir, dir.Name(), "jobs."+dumpFormat), prettyPrint)
+					readFile(filepath.Join(dumpDir, dir.Name(), "cronjobs."+dumpFormat), prettyPrint)
+					readFile(filepath.Join(dumpDir, dir.Name(), "roles."+dumpFormat), prettyPrint)
+					readFile(filepath.Join(dumpDir, dir.Name(), "rolebindings."+dumpFormat), prettyPrint)
+					// readFile(dumpDir, prettyPrint, "event", dir.Name(), "")
+					// fmt.Println("-------------")
+					// readFromDir(dumpDir, prettyPrint, "svc", dir.Name(), "")
+					// fmt.Println("-------------")
+					// readFromDir(dumpDir, prettyPrint, "ds", dir.Name(), "")
+					// fmt.Println("-------------")
+					// readFromDir(dumpDir, prettyPrint, "deploy", dir.Name(), "")
+					// fmt.Println("-------------")
+					// readFromDir(dumpDir, prettyPrint, "rs", dir.Name(), "")
+					// fmt.Println("-------------")
+					// readFromDir(dumpDir, prettyPrint, "po", dir.Name(), "")
+					// fmt.Println("-------------")
+				}
 			}
 		} else {
 			readFile(dumpFile, prettyPrint)

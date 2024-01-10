@@ -82,7 +82,7 @@ func processDoc(buffer string) {
 	if result["kind"] == nil {
 		return
 	}
-	// log.Print(resType, resNamespace, resName, result["kind"])
+	// log.Print(resType+"/", resNamespace+"/", resName+"/", result["kind"].(string)+"/", resKind)
 	if result["kind"] == "List" {
 		for _, item := range result["items"].([]interface{}) {
 			obj := item.(map[string]interface{})

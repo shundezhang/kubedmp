@@ -262,7 +262,7 @@ func prettyPrintNodeList(items []interface{}) {
 		labels := metadata["labels"].(map[string]interface{})
 		role := "<none>"
 		roles := []string{}
-		for r, _ := range labels {
+		for r := range labels {
 			if strings.HasPrefix(r, "node-role.kubernetes.io/") {
 				roles = append(roles, strings.Split(r, "/")[1])
 			}
