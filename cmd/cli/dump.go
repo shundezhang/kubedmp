@@ -161,7 +161,7 @@ func (o *ExtraInfoDumpOptions) runExtra() error {
 	if err != nil {
 		return err
 	}
-	if err := o.PrintObj(pvs, setupOutputWriter(o.OutputDir, o.Out, "pvs", fileExtension)); err != nil {
+	if err := o.PrintObj(pvs, setupOutputWriter(o.OutputDir, o.Out, DumpFileNames["PersistentVolume"], fileExtension)); err != nil {
 		return err
 	}
 
@@ -169,7 +169,7 @@ func (o *ExtraInfoDumpOptions) runExtra() error {
 	if err != nil {
 		return err
 	}
-	if err := o.PrintObj(scs, setupOutputWriter(o.OutputDir, o.Out, "scs", fileExtension)); err != nil {
+	if err := o.PrintObj(scs, setupOutputWriter(o.OutputDir, o.Out, DumpFileNames["StorageClass"], fileExtension)); err != nil {
 		return err
 	}
 
@@ -177,7 +177,7 @@ func (o *ExtraInfoDumpOptions) runExtra() error {
 	if err != nil {
 		return err
 	}
-	if err := o.PrintObj(clusterroles, setupOutputWriter(o.OutputDir, o.Out, "clusterroles", fileExtension)); err != nil {
+	if err := o.PrintObj(clusterroles, setupOutputWriter(o.OutputDir, o.Out, DumpFileNames["ClusterRole"], fileExtension)); err != nil {
 		return err
 	}
 
@@ -185,7 +185,7 @@ func (o *ExtraInfoDumpOptions) runExtra() error {
 	if err != nil {
 		return err
 	}
-	if err := o.PrintObj(clusterrolebindings, setupOutputWriter(o.OutputDir, o.Out, "clusterrolebindings", fileExtension)); err != nil {
+	if err := o.PrintObj(clusterrolebindings, setupOutputWriter(o.OutputDir, o.Out, DumpFileNames["ClusterRoleBinding"], fileExtension)); err != nil {
 		return err
 	}
 
@@ -213,7 +213,7 @@ func (o *ExtraInfoDumpOptions) runExtra() error {
 		if err != nil {
 			return err
 		}
-		if err := o.PrintObj(endpoints, setupOutputWriter(o.OutputDir, o.Out, path.Join(namespace, "endpoints"), fileExtension)); err != nil {
+		if err := o.PrintObj(endpoints, setupOutputWriter(o.OutputDir, o.Out, path.Join(namespace, DumpFileNames["Endpoints"]), fileExtension)); err != nil {
 			return err
 		}
 
@@ -221,7 +221,7 @@ func (o *ExtraInfoDumpOptions) runExtra() error {
 		if err != nil {
 			return err
 		}
-		if err := o.PrintObj(pvcs, setupOutputWriter(o.OutputDir, o.Out, path.Join(namespace, "pvc"), fileExtension)); err != nil {
+		if err := o.PrintObj(pvcs, setupOutputWriter(o.OutputDir, o.Out, path.Join(namespace, DumpFileNames["PersistentVolumeClaim"]), fileExtension)); err != nil {
 			return err
 		}
 
@@ -229,7 +229,7 @@ func (o *ExtraInfoDumpOptions) runExtra() error {
 		if err != nil {
 			return err
 		}
-		if err := o.PrintObj(secrets, setupOutputWriter(o.OutputDir, o.Out, path.Join(namespace, "secrets"), fileExtension)); err != nil {
+		if err := o.PrintObj(secrets, setupOutputWriter(o.OutputDir, o.Out, path.Join(namespace, DumpFileNames["Secret"]), fileExtension)); err != nil {
 			return err
 		}
 
@@ -237,7 +237,7 @@ func (o *ExtraInfoDumpOptions) runExtra() error {
 		if err != nil {
 			return err
 		}
-		if err := o.PrintObj(configmaps, setupOutputWriter(o.OutputDir, o.Out, path.Join(namespace, "configmaps"), fileExtension)); err != nil {
+		if err := o.PrintObj(configmaps, setupOutputWriter(o.OutputDir, o.Out, path.Join(namespace, DumpFileNames["ConfigMap"]), fileExtension)); err != nil {
 			return err
 		}
 
@@ -245,7 +245,7 @@ func (o *ExtraInfoDumpOptions) runExtra() error {
 		if err != nil {
 			return err
 		}
-		if err := o.PrintObj(serviceaccounts, setupOutputWriter(o.OutputDir, o.Out, path.Join(namespace, "serviceaccounts"), fileExtension)); err != nil {
+		if err := o.PrintObj(serviceaccounts, setupOutputWriter(o.OutputDir, o.Out, path.Join(namespace, DumpFileNames["ServiceAccount"]), fileExtension)); err != nil {
 			return err
 		}
 
@@ -253,7 +253,7 @@ func (o *ExtraInfoDumpOptions) runExtra() error {
 		if err != nil {
 			return err
 		}
-		if err := o.PrintObj(statefulsets, setupOutputWriter(o.OutputDir, o.Out, path.Join(namespace, "statefulsets"), fileExtension)); err != nil {
+		if err := o.PrintObj(statefulsets, setupOutputWriter(o.OutputDir, o.Out, path.Join(namespace, DumpFileNames["StatefulSet"]), fileExtension)); err != nil {
 			return err
 		}
 
@@ -261,7 +261,7 @@ func (o *ExtraInfoDumpOptions) runExtra() error {
 		if err != nil {
 			return err
 		}
-		if err := o.PrintObj(ingresses, setupOutputWriter(o.OutputDir, o.Out, path.Join(namespace, "ingresses"), fileExtension)); err != nil {
+		if err := o.PrintObj(ingresses, setupOutputWriter(o.OutputDir, o.Out, path.Join(namespace, DumpFileNames["Ingress"]), fileExtension)); err != nil {
 			return err
 		}
 
@@ -269,7 +269,7 @@ func (o *ExtraInfoDumpOptions) runExtra() error {
 		if err != nil {
 			return err
 		}
-		if err := o.PrintObj(jobs, setupOutputWriter(o.OutputDir, o.Out, path.Join(namespace, "jobs"), fileExtension)); err != nil {
+		if err := o.PrintObj(jobs, setupOutputWriter(o.OutputDir, o.Out, path.Join(namespace, DumpFileNames["Job"]), fileExtension)); err != nil {
 			return err
 		}
 
@@ -277,7 +277,7 @@ func (o *ExtraInfoDumpOptions) runExtra() error {
 		if err != nil {
 			return err
 		}
-		if err := o.PrintObj(cronjobs, setupOutputWriter(o.OutputDir, o.Out, path.Join(namespace, "cronjobs"), fileExtension)); err != nil {
+		if err := o.PrintObj(cronjobs, setupOutputWriter(o.OutputDir, o.Out, path.Join(namespace, DumpFileNames["CronJob"]), fileExtension)); err != nil {
 			return err
 		}
 
@@ -285,7 +285,7 @@ func (o *ExtraInfoDumpOptions) runExtra() error {
 		if err != nil {
 			return err
 		}
-		if err := o.PrintObj(roles, setupOutputWriter(o.OutputDir, o.Out, path.Join(namespace, "roles"), fileExtension)); err != nil {
+		if err := o.PrintObj(roles, setupOutputWriter(o.OutputDir, o.Out, path.Join(namespace, DumpFileNames["Role"]), fileExtension)); err != nil {
 			return err
 		}
 
@@ -293,7 +293,7 @@ func (o *ExtraInfoDumpOptions) runExtra() error {
 		if err != nil {
 			return err
 		}
-		if err := o.PrintObj(rolebindings, setupOutputWriter(o.OutputDir, o.Out, path.Join(namespace, "rolebindings"), fileExtension)); err != nil {
+		if err := o.PrintObj(rolebindings, setupOutputWriter(o.OutputDir, o.Out, path.Join(namespace, DumpFileNames["RoleBinding"]), fileExtension)); err != nil {
 			return err
 		}
 

@@ -291,7 +291,7 @@ func prettyPrintNodeList(items []interface{}) {
 				state += cond["type"].(string) + " "
 			}
 		}
-		if spec["unschedulable"] != nil && spec["unschedulable"].(bool) == true {
+		if spec["unschedulable"] != nil && spec["unschedulable"].(bool) {
 			state += "SchedulingDisabled "
 		}
 		fmt.Fprintf(writer, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", nodeName, strings.Replace(strings.Trim(state, " "), " ", ",", -1), role, age, kubletVersion, ipaddress, extip, osImage, kernelVersion, containerRuntimeVersion)
@@ -456,7 +456,7 @@ func prettyPrintStatefulSetList(items []interface{}) {
 		// fmt.Println("ready: ", status["readyReplicas"])
 		replica := strconv.FormatInt(int64((spec["replicas"].(float64))), 10)
 		ready := "0"
-		if status["readyReplicas"].(float64) > 0 {
+		if status["readyReplicas"] != nil && status["readyReplicas"].(float64) > 0 {
 			ready = strconv.FormatInt(int64((status["readyReplicas"].(float64))), 10)
 		}
 		// address := item.(map[string]interface{})["status"]["addresses"].(map[string]interface{})
@@ -481,11 +481,26 @@ func prettyPrintDaemonSetList(items []interface{}) {
 		creationTimeStr := metadata["creationTimestamp"].(string)
 		// fmt.Println("creationTimeStr: ", creationTimeStr)
 		age := getAge(creationTimeStr)
-		ready := strconv.FormatInt(int64((status["numberReady"].(float64))), 10)
-		current := strconv.FormatInt(int64((status["currentNumberScheduled"].(float64))), 10)
-		update := strconv.FormatInt(int64((status["updatedNumberScheduled"].(float64))), 10)
-		avail := strconv.FormatInt(int64((status["numberAvailable"].(float64))), 10)
-		desire := strconv.FormatInt(int64((status["desiredNumberScheduled"].(float64))), 10)
+		ready := "0"
+		if status["numberReady"] != nil && status["numberReady"].(float64) > 0 {
+			strconv.FormatInt(int64((status["numberReady"].(float64))), 10)
+		}
+		current := "0"
+		if status["currentNumberScheduled"] != nil && status["currentNumberScheduled"].(float64) > 0 {
+			strconv.FormatInt(int64((status["currentNumberScheduled"].(float64))), 10)
+		}
+		update := "0"
+		if status["updatedNumberScheduled"] != nil && status["updatedNumberScheduled"].(float64) > 0 {
+			strconv.FormatInt(int64((status["updatedNumberScheduled"].(float64))), 10)
+		}
+		avail := "0"
+		if status["numberAvailable"] != nil && status["numberAvailable"].(float64) > 0 {
+			avail = strconv.FormatInt(int64((status["numberAvailable"].(float64))), 10)
+		}
+		desire := "0"
+		if status["desiredNumberScheduled"] != nil && status["desiredNumberScheduled"].(float64) > 0 {
+			strconv.FormatInt(int64((status["desiredNumberScheduled"].(float64))), 10)
+		}
 		// fmt.Println("name: ", metadata["name"])
 		nodeSelectorList := []string{}
 		if _, ok := templateSpec["nodeSelector"]; ok {

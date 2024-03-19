@@ -45,10 +45,48 @@ If the pod has more than one container, and a container name is not specified, l
 		// 	return
 		// }
 		// fmt.Printf("parsing dump file %s\n", dumpFile)
-		logFile := dumpFile
+		logFile := ""
+		marker := resNamespace + "/" + podName
+		if len(resContainer) > 0 {
+			marker = "container " + resContainer + " of pod " + resNamespace + "/" + podName
+		}
 
 		if len(dumpDir) > 0 {
-			logFile = filepath.Join(dumpDir, resNamespace, podName, "logs.txt")
+			dumpDirPath, _ := filepath.Abs(dumpDir)
+			// fmt.Println("fullPath: ", dumpDirPath)
+			if strings.Contains(dumpDirPath, "sos_commands") && strings.Contains(dumpDirPath, "kubernetes") {
+				marker = ""
+				podFiles, err1 := os.ReadDir(filepath.Join(dumpDir, "pods"))
+				if err1 != nil {
+					log.Fatalf("Error to open [dir=%v]: %v", dumpDir, err1.Error())
+				}
+				for _, podFile := range podFiles {
+					// fmt.Println("podFile: ", podFile.Name())
+					if podFile.IsDir() {
+						continue
+					}
+					// fmt.Println("search string: ", "_--namespace_"+resNamespace+"_logs_"+podName+"_-c_")
+					// fmt.Println("in name: ", strings.Contains(podFile.Name(), "_--namespace_"+resNamespace+"_logs_"+podName+"_-c_"))
+					if len(resContainer) > 0 && strings.HasSuffix(podFile.Name(), "_--namespace_"+resNamespace+"_logs_"+podName+"_-c_"+resContainer) {
+						logFile = filepath.Join(dumpDir, "pods", podFile.Name())
+						break
+					} else if len(resContainer) == 0 && strings.Contains(podFile.Name(), "_--namespace_"+resNamespace+"_logs_"+podName+"_-c_") {
+						// fmt.Println("podFile: ", 2)
+						if len(logFile) > 0 {
+							log.Fatalf("Please specify a container name since this pod %s/%s has more than one containers.", resNamespace, podName)
+							break
+						}
+						logFile = filepath.Join(dumpDir, "pods", podFile.Name())
+					}
+				}
+			} else {
+				logFile = filepath.Join(dumpDir, resNamespace, podName, "logs.txt")
+			}
+		} else {
+			logFile = dumpFile
+		}
+		if len(logFile) == 0 {
+			log.Fatalf("No log is found for pod %s/%s.", resNamespace, podName)
 		}
 		f, err := os.Open(logFile)
 		if err != nil {
@@ -57,10 +95,6 @@ If the pod has more than one container, and a container name is not specified, l
 
 		finishedCh := make(chan bool, 1)
 		buff := make(chan string, 100)
-		marker := resNamespace + "/" + podName
-		if len(resContainer) > 0 {
-			marker = "container " + resContainer + " of pod " + resNamespace + "/" + podName
-		}
 		go scanFile(f, marker, buff, finishedCh)
 		defer func() {
 			f.Close()
@@ -90,14 +124,14 @@ func scanFile(f *os.File, marker string, buff chan string, finishedCh chan bool)
 	canPrint := false
 	for scanner.Scan() {
 		line := scanner.Text()
-		if strings.HasPrefix(line, "==== START logs for container") && strings.Contains(line, marker) {
+		if len(marker) == 0 || (strings.HasPrefix(line, "==== START logs for container") && strings.Contains(line, marker)) {
 			canPrint = true
 		}
 		if canPrint {
 			buff <- line
 			// fmt.Println(line)
 		}
-		if strings.HasPrefix(line, "==== END logs for container") && strings.Contains(line, marker) {
+		if len(marker) > 0 && strings.HasPrefix(line, "==== END logs for container") && strings.Contains(line, marker) {
 			canPrint = false
 		}
 	}
