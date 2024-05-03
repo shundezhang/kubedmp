@@ -1,3 +1,3 @@
-## version 0.8.2
+## version 0.8.3
 
-Add code to output EXTERNAL-IP in service list
+Fixed an issue when displaying CLUSTER-IP in service list

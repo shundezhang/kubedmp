@@ -422,12 +422,19 @@ func prettyPrintServiceList(items []interface{}) {
 			portList := []string{}
 			for _, item1 := range ports {
 				port := item1.(map[string]interface{})
-				portList = append(portList, strconv.FormatInt(int64((port["port"].(float64))), 10)+"/"+port["protocol"].(string))
+				// fmt.Println(port)
+				// fmt.Println(strconv.FormatInt(int64(port["port"].(float64)), 10))
+				// fmt.Println(port["protocol"].(string))
+				portList = append(portList, strconv.FormatInt(int64(port["port"].(float64)), 10)+"/"+port["protocol"].(string))
 			}
 			portString = strings.Join(portList, ",")
 		}
+		clusterIP := "<none>"
+		if spec["clusterIP"] != nil {
+			clusterIP = spec["clusterIP"].(string)
+		}
 		// address := item.(map[string]interface{})["status"]["addresses"].(map[string]interface{})
-		fmt.Fprintf(writer, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n", metadata["namespace"], metadata["name"], spec["type"], spec["clusterIP"], extip, portString, age)
+		fmt.Fprintf(writer, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n", metadata["namespace"], metadata["name"], spec["type"], clusterIP, extip, portString, age)
 	}
 	writer.Flush()
 }
