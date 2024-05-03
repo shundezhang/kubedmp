@@ -11,6 +11,8 @@ import (
 	"strings"
 	"text/tabwriter"
 	"time"
+
+	"k8s.io/apimachinery/pkg/util/sets"
 )
 
 type PickItem func(string, string, string, string) []interface{}
@@ -353,13 +355,69 @@ func prettyPrintServiceList(items []interface{}) {
 		svc := item.(map[string]interface{})
 		// fmt.Println("item: ", reflect.TypeOf(node["status"]).String())
 		spec := svc["spec"].(map[string]interface{})
+		status := svc["status"].(map[string]interface{})
 		metadata := svc["metadata"].(map[string]interface{})
 		creationTimeStr := metadata["creationTimestamp"].(string)
 		// fmt.Println("creationTimeStr: ", creationTimeStr)
 		age := getAge(creationTimeStr)
-		extip := "<none>"
-		portString := ""
-		if spec["ports"] != nil {
+		extip := "<unknown>"
+		result := sets.NewString()
+		switch spec["type"] {
+		case "ClusterIP":
+			if spec["externalIPs"] != nil && len(spec["externalIPs"].([]interface{})) > 0 {
+				extIPs := spec["externalIPs"].([]interface{})
+				for _, ip := range extIPs {
+					result.Insert(ip.(string))
+				}
+				extip = strings.Join(result.List(), ",")
+			} else {
+				extip = "<none>"
+			}
+		case "NodePort":
+			if spec["externalIPs"] != nil && len(spec["externalIPs"].([]interface{})) > 0 {
+				extIPs := spec["externalIPs"].([]interface{})
+				for _, ip := range extIPs {
+					result.Insert(ip.(string))
+				}
+				extip = strings.Join(result.List(), ",")
+			} else {
+				extip = "<none>"
+			}
+		case "LoadBalancer":
+			if status["loadBalancer"] != nil {
+				lb := status["loadBalancer"].(map[string]interface{})
+				if lb["ingress"] != nil && len(lb["ingress"].([]interface{})) > 0 {
+					extIPs := lb["ingress"].([]interface{})
+					for _, ing := range extIPs {
+						ingress := ing.(map[string]interface{})
+						if ingress["ip"] != nil {
+							result.Insert(ingress["ip"].(string))
+						} else if ingress["hostname"] != nil {
+							result.Insert(ingress["hostname"].(string))
+						}
+					}
+				}
+			}
+			if spec["externalIPs"] != nil && len(spec["externalIPs"].([]interface{})) > 0 {
+				extIPs := spec["externalIPs"].([]interface{})
+				for _, ip := range extIPs {
+					result.Insert(ip.(string))
+				}
+			}
+			if len(result) > 0 {
+				if len(result.List()) > 2 {
+					extip = strings.Join(result.List()[0:2], ",") + "..."
+				} else {
+					extip = strings.Join(result.List(), ",")
+				}
+			} else {
+				extip = "<pending>"
+			}
+		case "ExternalName":
+			extip = spec["externalName"].(string)
+		}
+		portString := "<none>"
+		if spec["ports"] != nil && len(spec["ports"].([]interface{})) > 0 {
 			ports := spec["ports"].([]interface{})
 			portList := []string{}
 			for _, item1 := range ports {
