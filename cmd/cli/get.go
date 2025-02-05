@@ -72,7 +72,7 @@ func init() {
 func processDoc(buffer string) {
 	var result map[string]interface{}
 	// fmt.Println(buffer)
-	// fmt.Println("=====================================================")
+	// fmt.Println("=====================================================\n===================================================")
 	err := json.Unmarshal([]byte(buffer), &result)
 
 	if err != nil {
@@ -80,6 +80,9 @@ func processDoc(buffer string) {
 		return
 	}
 	if result["kind"] == nil {
+		return
+	}
+	if result["items"] == nil {
 		return
 	}
 	// log.Print(resType+"/", resNamespace+"/", resName+"/", result["kind"].(string)+"/", resKind)

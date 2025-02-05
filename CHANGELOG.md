@@ -1,3 +1,3 @@
-## version 0.8.3
+## version 0.8.4
 
-Fixed an issue when displaying CLUSTER-IP in service list
+Changed bufio.NewScanner to bufio.NewReader to mitigate buffer issue

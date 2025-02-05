@@ -24,6 +24,9 @@ func prettyPrint(buffer string) {
 	if result["kind"] == "List" {
 		kind = resKind + "List"
 	}
+	if result["items"] == nil {
+		return
+	}
 	if kind != nil && len(result["items"].([]interface{})) > 0 {
 		fmt.Println("Kind: ", kind)
 		fmt.Println("================================================")

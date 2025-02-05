@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"strings"
@@ -187,11 +188,20 @@ func readFile(filePath string, pb ProcessBuffer) {
 	var buffer string
 	var inject bool
 
-	scanner := bufio.NewScanner(f)
+	reader := bufio.NewReader(f)
 	defer f.Close()
 
-	for scanner.Scan() {
-		line := scanner.Text()
+	for {
+		line, err := reader.ReadString('\n')
+		if err != nil {
+			if err == io.EOF {
+				break
+			}
+			log.Fatalf("Error while reading FD %v: %v", f.Fd(), err)
+			break
+		}
+		line = strings.TrimSuffix(line, "\n")
+		// log.Println("line:", line)
 		if line == "{" {
 			buffer = line
 			inject = true
