@@ -1,3 +1,3 @@
-## version 0.8.4
+## version 0.8.5
 
-Changed bufio.NewScanner to bufio.NewReader to mitigate buffer issue
+Changed bufio.NewScanner to bufio.NewReader for logs
