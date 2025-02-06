@@ -3,6 +3,7 @@ package cli
 import (
 	"bufio"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"path/filepath"
@@ -120,10 +121,18 @@ func init() {
 }
 
 func scanFile(f *os.File, marker string, buff chan string, finishedCh chan bool) {
-	scanner := bufio.NewScanner(f)
+	reader := bufio.NewReader(f)
 	canPrint := false
-	for scanner.Scan() {
-		line := scanner.Text()
+	for {
+		line, err := reader.ReadString('\n')
+		if err != nil {
+			if err == io.EOF {
+				break
+			}
+			log.Fatalf("Error while reading FD %v: %v", f.Fd(), err)
+			break
+		}
+		line = strings.TrimSuffix(line, "\n")
 		if len(marker) == 0 || (strings.HasPrefix(line, "==== START logs for container") && strings.Contains(line, marker)) {
 			canPrint = true
 		}
