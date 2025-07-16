@@ -202,20 +202,20 @@ func traverseDir() {
 			log.Fatalf("Error to open [dir=%v]: %v", dumpDir, err1.Error())
 		}
 		for _, dir := range subdirs {
-			// fmt.Println("dir: ", dir)
+			// fmt.Println("dir: ", dir.Name())
 			// subdirInfo, _ := os.Stat(filepath.Join(dumpDir, dir.Name()))
 			// fmt.Println("subdirInfo.Name(): ", subdirInfo.Name())
 			// fmt.Println("subdirInfo.IsDir(): ", subdirInfo.IsDir())
 			// fmt.Println("!contains(UnnamespacedTypes, resKind): ", !contains(UnnamespacedTypes, resKind))
 			// fmt.Println("subdirInfo.Name() == filename: ", subdirInfo.Name() == filename)
-			if dir.IsDir() && !contains(UnnamespacedTypes, resKind) && dir.Name() == filename {
+			if dir.IsDir() && !contains(UnnamespacedTypes, resKind) && (allNamespaces || dir.Name() == resNamespace) {
 				resFiles, err2 := os.ReadDir(filepath.Join(dumpDir, dir.Name()))
 				if err2 != nil {
 					log.Fatalf("Error to open [dir=%v]: %v", dir.Name(), err2.Error())
 				}
-				// fmt.Println("subdirInfo.Name(): ", subdirInfo.Name())
+				// fmt.Println("dir.Name(): ", dir.Name())
 				for _, resFile := range resFiles {
-					if allNamespaces || (!allNamespaces && strings.HasSuffix(resFile.Name(), "_--namespace_"+resNamespace+"_"+filename)) {
+					if !resFile.IsDir() && strings.HasSuffix(resFile.Name(), filename) {
 						itemFilename := filepath.Join(dumpDir, dir.Name(), resFile.Name())
 						// fmt.Println("itemFilename: ", itemFilename)
 						readFile(itemFilename, processDoc)
@@ -223,8 +223,10 @@ func traverseDir() {
 				}
 			} else if !dir.IsDir() && strings.HasSuffix(filepath.Base(dir.Name()), filename) {
 				itemFilename := filepath.Join(dumpDir, dir.Name())
-				// fmt.Println("itemFilename: ", itemFilename)
-				readFile(itemFilename, processDoc)
+				if strings.Contains(itemFilename, "-o_json") {
+					// fmt.Println("itemFilename: ", itemFilename)
+					readFile(itemFilename, processDoc)
+				}
 			}
 		}
 	} else {

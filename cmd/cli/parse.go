@@ -747,7 +747,10 @@ func prettyPrintEndpointsList(items []interface{}) {
 			eps = ""
 			for _, item1 := range subsets {
 				subset := item1.(map[string]interface{})
-				adds := subset["addresses"].([]interface{})
+				adds, ok1 := subset["addresses"].([]interface{})
+				if !ok1 {
+					adds, _ = subset["notReadyAddresses"].([]interface{})
+				}
 				ports := subset["ports"].([]interface{})
 				for _, item2 := range adds {
 					add := item2.(map[string]interface{})

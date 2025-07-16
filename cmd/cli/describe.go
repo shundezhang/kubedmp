@@ -75,18 +75,18 @@ var describeCmd = &cobra.Command{
 					log.Fatalf("Error to open [dir=%v]: %v", dumpDir, err1.Error())
 				}
 				for _, dir := range subdirs {
-					if contains(UnnamespacedTypes, resKind) && strings.HasSuffix(dir.Name(), "_get_"+filename) {
+					if contains(UnnamespacedTypes, resKind) && strings.HasSuffix(dir.Name(), "_get_-o_json_"+filename) {
 						filePath = filepath.Join(dumpDir, dir.Name())
 						break
 					}
-					if dir.IsDir() && dir.Name() == filename {
+					if dir.IsDir() && dir.Name() == resNamespace {
 						resFiles, err2 := os.ReadDir(filepath.Join(dumpDir, dir.Name()))
 						if err2 != nil {
 							log.Fatalf("Error to open [dir=%v]: %v", dir.Name(), err2.Error())
 						}
 						// fmt.Println("subdirInfo.Name(): ", subdirInfo.Name())
 						for _, resFile := range resFiles {
-							if strings.HasSuffix(resFile.Name(), "_--namespace_"+resNamespace+"_"+filename) {
+							if strings.HasSuffix(resFile.Name(), "_get_-o_json_--namespace_"+resNamespace+"_"+filename) {
 								filePath = filepath.Join(dumpDir, dir.Name(), resFile.Name())
 								break
 							}

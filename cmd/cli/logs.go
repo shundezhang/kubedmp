@@ -57,27 +57,26 @@ If the pod has more than one container, and a container name is not specified, l
 			// fmt.Println("fullPath: ", dumpDirPath)
 			if strings.Contains(dumpDirPath, "sos_commands") && strings.Contains(dumpDirPath, "kubernetes") {
 				marker = ""
-				podFiles, err1 := os.ReadDir(filepath.Join(dumpDir, "pods"))
+				podFiles, err1 := os.ReadDir(filepath.Join(dumpDir, resNamespace, "podlogs", podName))
 				if err1 != nil {
 					log.Fatalf("Error to open [dir=%v]: %v", dumpDir, err1.Error())
 				}
-				for _, podFile := range podFiles {
-					// fmt.Println("podFile: ", podFile.Name())
-					if podFile.IsDir() {
-						continue
-					}
-					// fmt.Println("search string: ", "_--namespace_"+resNamespace+"_logs_"+podName+"_-c_")
-					// fmt.Println("in name: ", strings.Contains(podFile.Name(), "_--namespace_"+resNamespace+"_logs_"+podName+"_-c_"))
-					if len(resContainer) > 0 && strings.HasSuffix(podFile.Name(), "_--namespace_"+resNamespace+"_logs_"+podName+"_-c_"+resContainer) {
-						logFile = filepath.Join(dumpDir, "pods", podFile.Name())
-						break
-					} else if len(resContainer) == 0 && strings.Contains(podFile.Name(), "_--namespace_"+resNamespace+"_logs_"+podName+"_-c_") {
-						// fmt.Println("podFile: ", 2)
-						if len(logFile) > 0 {
-							log.Fatalf("Please specify a container name since this pod %s/%s has more than one containers.", resNamespace, podName)
+				if len(resContainer) == 0 && len(podFiles) > 1 {
+					log.Fatalf("Please specify a container name since this pod %s/%s has more than one containers.", resNamespace, podName)
+				} else {
+					for _, podFile := range podFiles {
+						// fmt.Println("podFile: ", podFile.Name())
+						if podFile.IsDir() {
+							continue
+						}
+						// fmt.Println("search string: ", "_--namespace_"+resNamespace+"_logs_"+podName+"_-c_")
+						// fmt.Println("in name: ", strings.Contains(podFile.Name(), "_--namespace_"+resNamespace+"_logs_"+podName+"_-c_"))
+						if (len(resContainer) > 0 && strings.HasSuffix(podFile.Name(), "_--namespace_"+resNamespace+"_logs_"+podName+"_-c_"+resContainer)) ||
+							len(resContainer) == 0 {
+							logFile = filepath.Join(dumpDir, resNamespace, "podlogs", podName, podFile.Name())
+							// fmt.Println("logFile:", logFile)
 							break
 						}
-						logFile = filepath.Join(dumpDir, "pods", podFile.Name())
 					}
 				}
 			} else {

@@ -112,25 +112,28 @@ var showCmd = &cobra.Command{
 					log.Fatalf("Error to open [dir=%v]: %v", dumpDir, err1.Error())
 				}
 				for _, dir := range subdirs {
-					if dir.IsDir() && (dir.Name() == "pods" || dir.Name() == "pvc" || dir.Name() == "services" ||
-						dir.Name() == "deployments" || dir.Name() == "ingresses") {
+					// fmt.Println("dir.Name(): ", dir.Name())
+					if dir.IsDir() {
 						resFiles, err2 := os.ReadDir(filepath.Join(dumpDir, dir.Name()))
-						resKind, _ = getKind(dir.Name())
-						resType = dir.Name()
+						// resType = dir.Name()
 						if err2 != nil {
 							log.Fatalf("Error to open [dir=%v]: %v", dir.Name(), err2.Error())
 						}
-						// fmt.Println("dir.Name(): ", dir.Name())
-						// fmt.Println("resKind: ", resKind)
 						for _, resFile := range resFiles {
-							itemFilename := filepath.Join(dumpDir, dir.Name(), resFile.Name())
-							// fmt.Println("itemFilename: ", itemFilename)
-							readFile(itemFilename, prettyPrint)
+							if strings.Contains(resFile.Name(), "_get_-o_json_") {
+								// fmt.Println("kind: ", resFile.Name()[strings.LastIndex(resFile.Name(), "_")+1:])
+								resKind, _ = getKind(resFile.Name()[strings.LastIndex(resFile.Name(), "_")+1:])
+								// fmt.Println("resKind: ", resKind)
+								itemFilename := filepath.Join(dumpDir, dir.Name(), resFile.Name())
+								// fmt.Println("itemFilename: ", itemFilename)
+								readFile(itemFilename, prettyPrint)
+							}
 						}
-					} else if !dir.IsDir() && strings.HasSuffix(filepath.Base(dir.Name()), "_get_pv") {
-						// fmt.Println("kind: ", dir.Name()[strings.LastIndex(dir.Name(), "_"):])
-						resKind, _ = getKind(dir.Name()[strings.LastIndex(dir.Name(), "_"):])
+					} else if !dir.IsDir() && strings.Contains(dir.Name(), "_get_-o_json_") {
+						// fmt.Println("kind: ", dir.Name()[strings.LastIndex(dir.Name(), "_")+1:])
+						resKind, _ = getKind(dir.Name()[strings.LastIndex(dir.Name(), "_")+1:])
 						itemFilename := filepath.Join(dumpDir, dir.Name())
+						// fmt.Println("resKind: ", resKind)
 						// fmt.Println("itemFilename: ", itemFilename)
 						readFile(itemFilename, prettyPrint)
 					}
