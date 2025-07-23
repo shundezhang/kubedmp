@@ -1,3 +1,3 @@
-## version 0.8.5
+## version 0.9.0
 
-Changed bufio.NewScanner to bufio.NewReader for logs
+Supports cluster-info collected by sosreport 4.7.1+
