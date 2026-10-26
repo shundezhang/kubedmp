@@ -5,7 +5,7 @@ description: |
       them in a format similar to output of kubectl get/describe resources.
 adopt-info: kubedmp
 grade: stable
-base: core20
+base: core22
 
 confinement: devmode
 

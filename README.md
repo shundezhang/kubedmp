@@ -171,7 +171,7 @@ Download tarball from [releases](https://github.com/shundezhang/kubedmp/releases
 Homebrew supports MacOS and Linux.
 ```
 brew tap shundezhang/kubedmp
-brew install shundezhang/kubedmp/kubedmp
+brew install --cask shundezhang/kubedmp/kubedmp
 ```
 ### Snap
 Snap supports Linux. If use snap version, dump files must be put in $HOME due to snap confinement.
@@ -190,9 +190,9 @@ Build binary
 ```
 make bin
 ```
-Or use goreleaser
+Or use goreleaser (v2)
 ```
-goreleaser --snapshot --skip-publish --clean
+goreleaser release --snapshot --clean --skip=publish
 ```
 
 Release

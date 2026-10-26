@@ -26,10 +26,10 @@ jobs:
           sudo apt-get install -qy snapd
           sudo snap install snapcraft --classic
       - name: Run goreleaser
-        uses: goreleaser/goreleaser-action@v3
+        uses: goreleaser/goreleaser-action@v6
         with:
           distribution: goreleaser
-          version: ${{ env.GITHUB_REF_NAME }}
+          version: '~> v2'
           args: release --clean --release-notes CHANGELOG.md
         env:
           GITHUB_TOKEN: ${{ secrets.PUBLISHER_TOKEN }}
