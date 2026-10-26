@@ -2,6 +2,8 @@
 
 DUMP=""
 DUMP_LOCATION=$1
+#TEST_COMMAND="go run cmd/main.go"
+TEST_COMMAND="bin/kubedmp_darwin_arm64"
 if [ -d "$DUMP_LOCATION" ]
 then
     DUMP="-d $DUMP_LOCATION"
@@ -27,32 +29,32 @@ test_command () {
 }
 
 test_res () {
-    test_command "go run cmd/main.go $DUMP get $1 -A"
+    test_command "$TEST_COMMAND $DUMP get $1 -A"
     ns=$(echo $list | cut -f1 -d' ')
     item=$(echo $list | cut -f2 -d' ')
-    test_command "go run cmd/main.go $DUMP describe $1 $item -n $ns"
+    test_command "$TEST_COMMAND $DUMP describe $1 $item -n $ns"
 }
 
-test_command "go run cmd/main.go $DUMP show"
-test_command "go run cmd/main.go $DUMP get no"
+test_command "$TEST_COMMAND $DUMP show"
+test_command "$TEST_COMMAND $DUMP get no"
 item=$(echo $list | cut -f1 -d' ')
-test_command "go run cmd/main.go $DUMP describe no $item"
+test_command "$TEST_COMMAND $DUMP describe no $item"
 
-test_command "go run cmd/main.go $DUMP get pv"
+test_command "$TEST_COMMAND $DUMP get pv"
 item=$(echo $list | cut -f1 -d' ')
-test_command "go run cmd/main.go $DUMP describe pv $item"
+test_command "$TEST_COMMAND $DUMP describe pv $item"
 
-test_command "go run cmd/main.go $DUMP get sc"
+test_command "$TEST_COMMAND $DUMP get sc"
 item=$(echo $list | cut -f1 -d' ')
-test_command "go run cmd/main.go $DUMP describe sc $item"
+test_command "$TEST_COMMAND $DUMP describe sc $item"
 
-test_command "go run cmd/main.go $DUMP get clusterrole"
+test_command "$TEST_COMMAND $DUMP get clusterrole"
 item=$(echo $list | cut -f1 -d' ')
-test_command "go run cmd/main.go $DUMP describe clusterrole $item"
+test_command "$TEST_COMMAND $DUMP describe clusterrole $item"
 
-test_command "go run cmd/main.go $DUMP get clusterrolebinding"
+test_command "$TEST_COMMAND $DUMP get clusterrolebinding"
 item=$(echo $list | cut -f1 -d' ')
-test_command "go run cmd/main.go $DUMP describe clusterrolebinding $item"
+test_command "$TEST_COMMAND $DUMP describe clusterrolebinding $item"
 
 test_res "po"
 test_res "svc"

@@ -2,11 +2,14 @@ package cli
 
 import (
 	"bufio"
+	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"log"
 	"os"
+	"path/filepath"
 	"strings"
 	"text/tabwriter"
 
@@ -15,7 +18,10 @@ import (
 	"github.com/spf13/viper"
 )
 
-type ProcessBuffer func(string)
+// ProcessBuffer is called with the contents of one JSON document. The slice is
+// only valid for the duration of the call; callbacks must not retain it.
+// Returning false stops reading the file.
+type ProcessBuffer func([]byte) bool
 
 var (
 	dumpFileFlag = "dumpfile"
@@ -164,6 +170,31 @@ func getKind(resType string) (string, error) {
 	return "", errors.New("resource type not supported")
 }
 
+// parseResourceArgs parses resource arguments in either "TYPE NAME" or
+// "TYPE/NAME" form. The name is optional so commands like get can list a type.
+func parseResourceArgs(args []string) (resourceType, resourceName string, err error) {
+	if len(args) == 0 {
+		return "", "", errors.New("resource type is required")
+	}
+
+	if strings.Contains(args[0], "/") {
+		parts := strings.SplitN(args[0], "/", 2)
+		if parts[0] == "" || parts[1] == "" || strings.Contains(parts[1], "/") {
+			return "", "", fmt.Errorf("invalid resource %q: expected TYPE/NAME", args[0])
+		}
+		if len(args) > 1 {
+			return "", "", fmt.Errorf("unexpected argument %q after %q", args[1], args[0])
+		}
+		return parts[0], parts[1], nil
+	}
+
+	resourceType = args[0]
+	if len(args) > 1 {
+		resourceName = args[1]
+	}
+	return resourceType, resourceName, nil
+}
+
 func contains(s []string, e string) bool {
 	for _, a := range s {
 		if a == e {
@@ -173,46 +204,106 @@ func contains(s []string, e string) bool {
 	return false
 }
 
-func readFile(filePath string, pb ProcessBuffer) {
-	// log.Print(filePath)
-	_, error := os.Stat(filePath)
-
-	// check if error is "file not exists"
-	if os.IsNotExist(error) {
-		return
+// isSosreportDir reports whether dir uses the sosreport cluster-info layout.
+func isSosreportDir(dir string) bool {
+	abs, err := filepath.Abs(dir)
+	if err != nil {
+		return false
 	}
+	return strings.Contains(abs, "sos_commands") && strings.Contains(abs, "kubernetes")
+}
+
+// docKind returns the top-level "kind" field of a JSON document without
+// decoding the rest of it. Kubernetes writes "kind" first, so this avoids
+// decoding large documents that are irrelevant to the current command.
+func docKind(data []byte) string {
+	dec := json.NewDecoder(bytes.NewReader(data))
+	tok, err := dec.Token()
+	if err != nil {
+		return ""
+	}
+	if delim, ok := tok.(json.Delim); !ok || delim != '{' {
+		return ""
+	}
+	for dec.More() {
+		tok, err := dec.Token()
+		if err != nil {
+			return ""
+		}
+		key, ok := tok.(string)
+		if !ok {
+			return ""
+		}
+		if key == "kind" {
+			var kind string
+			if err := dec.Decode(&kind); err != nil {
+				return ""
+			}
+			return kind
+		}
+		var skip json.RawMessage
+		if err := dec.Decode(&skip); err != nil {
+			return ""
+		}
+	}
+	return ""
+}
+
+// docMatchesKind reports whether a document of the given kind contains
+// resources of resourceKind. A generic "List" may contain any resource kind.
+func docMatchesKind(kind, resourceKind string) bool {
+	if kind == "List" {
+		return true
+	}
+	return strings.HasSuffix(kind, "List") && strings.TrimSuffix(kind, "List") == resourceKind
+}
+
+func readFile(filePath string, pb ProcessBuffer) {
 	f, err := os.Open(filePath)
 	if err != nil {
+		// A missing file is expected when a dump directory does not contain a
+		// particular resource type.
+		if os.IsNotExist(err) {
+			return
+		}
 		log.Fatalf("Error to read [file=%v]: %v", filePath, err.Error())
 	}
-	var buffer string
+	defer f.Close()
+
+	var buffer bytes.Buffer
 	var inject bool
 
-	reader := bufio.NewReader(f)
-	defer f.Close()
+	reader := bufio.NewReaderSize(f, 64*1024)
 
 	for {
 		line, err := reader.ReadString('\n')
-		if err != nil {
-			if err == io.EOF {
-				break
+		if len(line) > 0 {
+			line = strings.TrimSuffix(line, "\n")
+			line = strings.TrimSuffix(line, "\r")
+			if inject {
+				if line == "}" {
+					buffer.WriteString(line)
+					inject = false
+					keepGoing := pb(buffer.Bytes())
+					buffer.Reset()
+					if !keepGoing {
+						return
+					}
+				} else {
+					buffer.WriteString(line)
+					buffer.WriteByte('\n')
+				}
+			} else if line == "{" {
+				buffer.Reset()
+				buffer.WriteString(line)
+				inject = true
 			}
-			log.Fatalf("Error while reading FD %v: %v", f.Fd(), err)
+		}
+		if err != nil {
+			if err != io.EOF {
+				log.Fatalf("Error while reading [file=%v]: %v", filePath, err)
+			}
 			break
 		}
-		line = strings.TrimSuffix(line, "\n")
-		// log.Println("line:", line)
-		if line == "{" {
-			buffer = line
-			inject = true
-		} else if line == "}" && inject {
-			buffer += line
-			inject = false
-			pb(buffer)
-			buffer = ""
-		} else if inject {
-			buffer += line
-		}
 	}
-
 }

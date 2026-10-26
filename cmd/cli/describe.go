@@ -33,29 +33,42 @@ var (
 	// globally skipped annotations
 	skipAnnotations  = sets.NewString(corev1.LastAppliedConfigAnnotation)
 	maxAnnotationLen = 140
+	objectDescribed  bool
 )
 
 var describeCmd = &cobra.Command{
-	Use:                   "describe TYPE RESOURCE_NAME [-n NAMESPACE]",
+	Use:                   "describe TYPE NAME | TYPE/NAME [-n NAMESPACE]",
 	DisableFlagsInUseLine: true,
 	Short:                 "Show details of a specific resource",
-	Long:                  `Show details of a specific resource. Print a detailed description of the selected resource.`,
+	Long: `Show details of a specific resource. Print a detailed description of the selected resource, including related events found in the dump.
+
+A resource can be selected with either "TYPE NAME" or "TYPE/NAME".`,
 	Example: `  # Describe a node
   $ kubedmp describe no juju-ceba75-k8s-2
   
   # Describe a pod in kube-system namespace
-  $ kubedmp describe po coredns-6bcf44f4cc-j9wkq -n kube-system`,
+  $ kubedmp describe po coredns-6bcf44f4cc-j9wkq -n kube-system
+
+  # Describe a pod using TYPE/NAME
+  $ kubedmp describe pod/nginx -n default`,
 	// Args:    cobra.MinimumNArgs(2),
 	Run: func(cmd *cobra.Command, args []string) {
 
-		if len(args) < 2 {
+		if len(args) == 0 {
 			log.Fatalf("Please specify a type and an object name\n")
 			return
 		}
-		resType = args[0]
-		resName = args[1]
 
 		var err error
+		resType, resName, err = parseResourceArgs(args)
+		if err != nil {
+			log.Fatalf("%v\n", err)
+			return
+		}
+		if resName == "" {
+			log.Fatalf("Please specify a type and an object name\n")
+			return
+		}
 		resKind, err = getKind(resType)
 		if err != nil {
 			log.Fatalf("%s is not a supported resource type.\n", resType)
@@ -66,10 +79,8 @@ var describeCmd = &cobra.Command{
 		}
 		filePath := dumpFile
 		if len(dumpDir) > 0 {
-			dumpDirPath, _ := filepath.Abs(dumpDir)
-			// fmt.Println("fullPath: ", dumpDirPath)
 			filename := DumpFileNames[resKind]
-			if strings.Contains(dumpDirPath, "sos_commands") && strings.Contains(dumpDirPath, "kubernetes") {
+			if isSosreportDir(dumpDir) {
 				subdirs, err1 := os.ReadDir(dumpDir)
 				if err1 != nil {
 					log.Fatalf("Error to open [dir=%v]: %v", dumpDir, err1.Error())
@@ -99,8 +110,13 @@ var describeCmd = &cobra.Command{
 			}
 		}
 		// fmt.Println("filePath: ", filePath)
+		objectDescribed = false
 		readFile(filePath, describeObject)
-
+		if objectDescribed {
+			if err := printObjectEvents(os.Stdout); err != nil {
+				log.Fatalf("Error generating events output: %v\n", err)
+			}
+		}
 	},
 }
 
@@ -126,360 +142,358 @@ func tabbedString(f func(io.Writer) error) (string, error) {
 	return buf.String(), nil
 }
 
-func describeObject(buffer string) {
-	var result map[string]interface{}
-	// fmt.Println(buffer)
-	// fmt.Println(resType, resNamespace, resName)
-	err := json.Unmarshal([]byte(buffer), &result)
-
-	if err != nil {
-		// log.Fatalf("Error processing buffer: %v\n%v\n", err.Error(), buffer)
-		return
+func describeObject(buffer []byte) bool {
+	kind := docKind(buffer)
+	if kind == "" || !docMatchesKind(kind, resKind) {
+		return true
+	}
+	found := false
+	printObject := func(s string) {
+		fmt.Println(s)
+		found = true
+		objectDescribed = true
 	}
 	// fmt.Println(result["kind"].(string))
-	if kind, ok := result["kind"].(string); ok {
+	if inType(resType, "Node") && (kind == "NodeList" || kind == "List") {
+		var nodeList corev1.NodeList
+		err := json.Unmarshal(buffer, &nodeList)
+		if err != nil {
+			log.Fatalf("Error parsing node list: %v\n%v\n", err.Error(), buffer)
+		}
+		for _, node := range nodeList.Items {
+			// fmt.Println("Checking ", node.Name)
+			if resName == node.Name {
 
-		if inType(resType, "Node") && (kind == "NodeList" || kind == "List") {
-			var nodeList corev1.NodeList
-			err := json.Unmarshal([]byte(buffer), &nodeList)
-			if err != nil {
-				log.Fatalf("Error parsing node list: %v\n%v\n", err.Error(), buffer)
-			}
-			for _, node := range nodeList.Items {
-				// fmt.Println("Checking ", node.Name)
-				if resName == node.Name {
-
-					s, err := DefaultObjectDescriber.DescribeObject(&node)
-					if err != nil {
-						log.Fatalf("Error generating output for node %s: %s", node.Name, err.Error())
-					}
-					fmt.Println(s)
-					break
+				s, err := DefaultObjectDescriber.DescribeObject(&node)
+				if err != nil {
+					log.Fatalf("Error generating output for node %s: %s", node.Name, err.Error())
 				}
-			}
-		} else if inType(resType, "PersistentVolume") && (kind == "PersistentVolumeList" || kind == "List") {
-			var pvList corev1.PersistentVolumeList
-			err := json.Unmarshal([]byte(buffer), &pvList)
-			if err != nil {
-				log.Fatalf("Error parsing pv list: %v\n%v\n", err.Error(), buffer)
-			}
-			for _, pv := range pvList.Items {
-				if resName == pv.Name {
-					s, err := DefaultObjectDescriber.DescribeObject(&pv)
-					if err != nil {
-						log.Fatalf("Error generating output for pv %s: %s", pv.Name, err.Error())
-					}
-					fmt.Println(s)
-					break
-				}
-			}
-		} else if inType(resType, "StorageClass") && (kind == "StorageClassList" || kind == "List") {
-			var scList storagev1.StorageClassList
-			err := json.Unmarshal([]byte(buffer), &scList)
-			if err != nil {
-				log.Fatalf("Error parsing sc list: %v\n%v\n", err.Error(), buffer)
-			}
-			for _, sc := range scList.Items {
-				if resName == sc.Name {
-					s, err := DefaultObjectDescriber.DescribeObject(&sc)
-					if err != nil {
-						log.Fatalf("Error generating output for sc %s: %s", sc.Name, err.Error())
-					}
-					fmt.Println(s)
-					break
-				}
-			}
-		} else if inType(resType, "ClusterRole") && (kind == "ClusterRoleList" || kind == "List") {
-			var crList rbacv1.ClusterRoleList
-			err := json.Unmarshal([]byte(buffer), &crList)
-			if err != nil {
-				log.Fatalf("Error parsing cluster role list: %v\n%v\n", err.Error(), buffer)
-			}
-			for _, cr := range crList.Items {
-				if resName == cr.Name {
-					s, err := describeClusterRole(&cr)
-					if err != nil {
-						log.Fatalf("Error generating output for cluster role %s: %s", cr.Name, err.Error())
-					}
-					fmt.Println(s)
-					break
-				}
-			}
-		} else if inType(resType, "ClusterRoleBinding") && (kind == "ClusterRoleBindingList" || kind == "List") {
-			var crbList rbacv1.ClusterRoleBindingList
-			err := json.Unmarshal([]byte(buffer), &crbList)
-			if err != nil {
-				log.Fatalf("Error parsing cluster role binding list: %v\n%v\n", err.Error(), buffer)
-			}
-			for _, crb := range crbList.Items {
-				if resName == crb.Name {
-					s, err := describeClusterRoleBinding(&crb)
-					if err != nil {
-						log.Fatalf("Error generating output for cluster role binding %s: %s", crb.Name, err.Error())
-					}
-					fmt.Println(s)
-					break
-				}
-			}
-		} else if inType(resType, "Pod") && (kind == "PodList" || kind == "List") {
-			var podList corev1.PodList
-			err := json.Unmarshal([]byte(buffer), &podList)
-			if err != nil {
-				log.Fatalf("Error parsing pod list: %v\n%v\n", err.Error(), buffer)
-			}
-			for _, pod := range podList.Items {
-				if resName == pod.Name && resNamespace == pod.Namespace {
-					s, err := DefaultObjectDescriber.DescribeObject(&pod)
-					if err != nil {
-						log.Fatalf("Error generating output for pod %s/%s: %s", pod.Namespace, pod.Name, err.Error())
-					}
-					fmt.Println(s)
-					break
-				}
-			}
-		} else if inType(resType, "Service") && (kind == "ServiceList" || kind == "List") {
-			var svcList corev1.ServiceList
-			err := json.Unmarshal([]byte(buffer), &svcList)
-			if err != nil {
-				log.Fatalf("Error parsing service list: %v\n%v\n", err.Error(), buffer)
-			}
-			for _, svc := range svcList.Items {
-				if resName == svc.Name && resNamespace == svc.Namespace {
-					s, err := DefaultObjectDescriber.DescribeObject(&svc)
-					if err != nil {
-						log.Fatalf("Error generating output for service %s/%s: %s", svc.Namespace, svc.Name, err.Error())
-					}
-					fmt.Println(s)
-					break
-				}
-			}
-		} else if inType(resType, "Deployment") && (kind == "DeploymentList" || kind == "List") {
-			var deployList appsv1.DeploymentList
-			err := json.Unmarshal([]byte(buffer), &deployList)
-			if err != nil {
-				log.Fatalf("Error parsing deployment list: %v\n%v\n", err.Error(), buffer)
-			}
-			for _, deploy := range deployList.Items {
-				if resName == deploy.Name && resNamespace == deploy.Namespace {
-					s, err := DefaultObjectDescriber.DescribeObject(&deploy)
-					if err != nil {
-						log.Fatalf("Error generating output for deployment %s/%s: %s", deploy.Namespace, deploy.Name, err.Error())
-					}
-					fmt.Println(s)
-					break
-				}
-			}
-		} else if inType(resType, "DaemonSet") && (kind == "DaemonSetList" || kind == "List") {
-			var daemonList appsv1.DaemonSetList
-			err := json.Unmarshal([]byte(buffer), &daemonList)
-			if err != nil {
-				log.Fatalf("Error parsing daemonset list: %v\n%v\n", err.Error(), buffer)
-			}
-			for _, daemon := range daemonList.Items {
-				if resName == daemon.Name && resNamespace == daemon.Namespace {
-					s, err := DefaultObjectDescriber.DescribeObject(&daemon)
-					if err != nil {
-						log.Fatalf("Error generating output for daemonset %s/%s: %s", daemon.Namespace, daemon.Name, err.Error())
-					}
-					fmt.Println(s)
-					break
-				}
-			}
-		} else if inType(resType, "ReplicaSet") && (kind == "ReplicaSetList" || kind == "List") {
-			var replicaList appsv1.ReplicaSetList
-			err := json.Unmarshal([]byte(buffer), &replicaList)
-			if err != nil {
-				log.Fatalf("Error parsing replicaset list: %v\n%v\n", err.Error(), buffer)
-			}
-			for _, rs := range replicaList.Items {
-				if resName == rs.Name && resNamespace == rs.Namespace {
-					s, err := DefaultObjectDescriber.DescribeObject(&rs)
-					if err != nil {
-						log.Fatalf("Error generating output for replicaset %s/%s: %s", rs.Namespace, rs.Name, err.Error())
-					}
-					fmt.Println(s)
-					break
-				}
-			}
-		} else if inType(resType, "StatefulSet") && (kind == "StatefulSetList" || kind == "List") {
-			var stsList appsv1.StatefulSetList
-			err := json.Unmarshal([]byte(buffer), &stsList)
-			if err != nil {
-				log.Fatalf("Error parsing statefulset list: %v\n%v\n", err.Error(), buffer)
-			}
-			for _, sts := range stsList.Items {
-				if resName == sts.Name && resNamespace == sts.Namespace {
-					s, err := DefaultObjectDescriber.DescribeObject(&sts)
-					if err != nil {
-						log.Fatalf("Error generating output for statefulset %s/%s: %s", sts.Namespace, sts.Name, err.Error())
-					}
-					fmt.Println(s)
-					break
-				}
-			}
-		} else if inType(resType, "PersistentVolumeClaim") && (kind == "PersistentVolumeClaimList" || kind == "List") {
-			var pvcList corev1.PersistentVolumeClaimList
-			err := json.Unmarshal([]byte(buffer), &pvcList)
-			if err != nil {
-				log.Fatalf("Error parsing pvc list: %v\n%v\n", err.Error(), buffer)
-			}
-			for _, pvc := range pvcList.Items {
-				if resName == pvc.Name && resNamespace == pvc.Namespace {
-					s, err := DefaultObjectDescriber.DescribeObject(&pvc)
-					if err != nil {
-						log.Fatalf("Error generating output for pvc %s/%s: %s", pvc.Namespace, pvc.Name, err.Error())
-					}
-					fmt.Println(s)
-					break
-				}
-			}
-		} else if inType(resType, "ConfigMap") && (kind == "ConfigMapList" || kind == "List") {
-			var cmList corev1.ConfigMapList
-			err := json.Unmarshal([]byte(buffer), &cmList)
-			if err != nil {
-				log.Fatalf("Error parsing cm list: %v\n%v\n", err.Error(), buffer)
-			}
-			for _, cm := range cmList.Items {
-				if resName == cm.Name && resNamespace == cm.Namespace {
-					s, err := describeConfigMap(&cm)
-					if err != nil {
-						log.Fatalf("Error generating output for cm %s/%s: %s", cm.Namespace, cm.Name, err.Error())
-					}
-					fmt.Println(s)
-					break
-				}
-			}
-		} else if inType(resType, "Secret") && (kind == "SecretList" || kind == "List") {
-			var secretList corev1.SecretList
-			err := json.Unmarshal([]byte(buffer), &secretList)
-			if err != nil {
-				log.Fatalf("Error parsing secret list: %v\n%v\n", err.Error(), buffer)
-			}
-			for _, scrt := range secretList.Items {
-				if resName == scrt.Name && resNamespace == scrt.Namespace {
-					s, err := DefaultObjectDescriber.DescribeObject(&scrt)
-					if err != nil {
-						log.Fatalf("Error generating output for secret %s/%s: %s", scrt.Namespace, scrt.Name, err.Error())
-					}
-					fmt.Println(s)
-					break
-				}
-			}
-		} else if inType(resType, "ServiceAccount") && (kind == "ServiceAccountList" || kind == "List") {
-			var saList corev1.ServiceAccountList
-			err := json.Unmarshal([]byte(buffer), &saList)
-			if err != nil {
-				log.Fatalf("Error parsing sa list: %v\n%v\n", err.Error(), buffer)
-			}
-			for _, sa := range saList.Items {
-				if resName == sa.Name && resNamespace == sa.Namespace {
-					s, err := DefaultObjectDescriber.DescribeObject(&sa)
-					if err != nil {
-						log.Fatalf("Error generating output for sa %s/%s: %s", sa.Namespace, sa.Name, err.Error())
-					}
-					fmt.Println(s)
-					break
-				}
-			}
-		} else if inType(resType, "Ingress") && (kind == "IngressList" || kind == "List") {
-			var ingList networkingv1.IngressList
-			err := json.Unmarshal([]byte(buffer), &ingList)
-			if err != nil {
-				log.Fatalf("Error parsing ingress list: %v\n%v\n", err.Error(), buffer)
-			}
-			for _, ing := range ingList.Items {
-				if resName == ing.Name && resNamespace == ing.Namespace {
-					s, err := describeIngressV1(&ing)
-					if err != nil {
-						log.Fatalf("Error generating output for ingress %s/%s: %s", ing.Namespace, ing.Name, err.Error())
-					}
-					fmt.Println(s)
-					break
-				}
-			}
-		} else if inType(resType, "Endpoints") && (kind == "EndpointsList" || kind == "List") {
-			var epList corev1.EndpointsList
-			err := json.Unmarshal([]byte(buffer), &epList)
-			if err != nil {
-				log.Fatalf("Error parsing ep list: %v\n%v\n", err.Error(), buffer)
-			}
-			for _, ep := range epList.Items {
-				if resName == ep.Name && resNamespace == ep.Namespace {
-					s, err := DefaultObjectDescriber.DescribeObject(&ep)
-					if err != nil {
-						log.Fatalf("Error generating output for ep %s/%s: %s", ep.Namespace, ep.Name, err.Error())
-					}
-					fmt.Println(s)
-					break
-				}
-			}
-		} else if inType(resType, "Job") && (kind == "JobList" || kind == "List") {
-			var jobList batchv1.JobList
-			err := json.Unmarshal([]byte(buffer), &jobList)
-			if err != nil {
-				log.Fatalf("Error parsing job list: %v\n%v\n", err.Error(), buffer)
-			}
-			for _, job := range jobList.Items {
-				if resName == job.Name && resNamespace == job.Namespace {
-					s, err := DefaultObjectDescriber.DescribeObject(&job)
-					if err != nil {
-						log.Fatalf("Error generating output for job %s/%s: %s", job.Namespace, job.Name, err.Error())
-					}
-					fmt.Println(s)
-					break
-				}
-			}
-		} else if inType(resType, "CronJob") && (kind == "CronJobList" || kind == "List") {
-			var jobList batchv1.CronJobList
-			err := json.Unmarshal([]byte(buffer), &jobList)
-			if err != nil {
-				log.Fatalf("Error parsing cron job list: %v\n%v\n", err.Error(), buffer)
-			}
-			for _, job := range jobList.Items {
-				if resName == job.Name && resNamespace == job.Namespace {
-					s, err := DefaultObjectDescriber.DescribeObject(&job)
-					if err != nil {
-						log.Fatalf("Error generating output for cron job %s/%s: %s", job.Namespace, job.Name, err.Error())
-					}
-					fmt.Println(s)
-					break
-				}
-			}
-		} else if inType(resType, "Role") && (kind == "RoleList" || kind == "List") {
-			var roleList rbacv1.RoleList
-			err := json.Unmarshal([]byte(buffer), &roleList)
-			if err != nil {
-				log.Fatalf("Error parsing role list: %v\n%v\n", err.Error(), buffer)
-			}
-			for _, role := range roleList.Items {
-				if resName == role.Name {
-					s, err := describeRole(&role)
-					if err != nil {
-						log.Fatalf("Error generating output for role %s: %s", role.Name, err.Error())
-					}
-					fmt.Println(s)
-					break
-				}
-			}
-		} else if inType(resType, "RoleBinding") && (kind == "RoleBindingList" || kind == "List") {
-			var rbList rbacv1.RoleBindingList
-			err := json.Unmarshal([]byte(buffer), &rbList)
-			if err != nil {
-				log.Fatalf("Error parsing role binding list: %v\n%v\n", err.Error(), buffer)
-			}
-			for _, rb := range rbList.Items {
-				if resName == rb.Name {
-					s, err := describeRoleBinding(&rb)
-					if err != nil {
-						log.Fatalf("Error generating output for role binding %s: %s", rb.Name, err.Error())
-					}
-					fmt.Println(s)
-					break
-				}
+				printObject(s)
+				break
 			}
 		}
-
+	} else if inType(resType, "PersistentVolume") && (kind == "PersistentVolumeList" || kind == "List") {
+		var pvList corev1.PersistentVolumeList
+		err := json.Unmarshal(buffer, &pvList)
+		if err != nil {
+			log.Fatalf("Error parsing pv list: %v\n%v\n", err.Error(), buffer)
+		}
+		for _, pv := range pvList.Items {
+			if resName == pv.Name {
+				s, err := DefaultObjectDescriber.DescribeObject(&pv)
+				if err != nil {
+					log.Fatalf("Error generating output for pv %s: %s", pv.Name, err.Error())
+				}
+				printObject(s)
+				break
+			}
+		}
+	} else if inType(resType, "StorageClass") && (kind == "StorageClassList" || kind == "List") {
+		var scList storagev1.StorageClassList
+		err := json.Unmarshal(buffer, &scList)
+		if err != nil {
+			log.Fatalf("Error parsing sc list: %v\n%v\n", err.Error(), buffer)
+		}
+		for _, sc := range scList.Items {
+			if resName == sc.Name {
+				s, err := DefaultObjectDescriber.DescribeObject(&sc)
+				if err != nil {
+					log.Fatalf("Error generating output for sc %s: %s", sc.Name, err.Error())
+				}
+				printObject(s)
+				break
+			}
+		}
+	} else if inType(resType, "ClusterRole") && (kind == "ClusterRoleList" || kind == "List") {
+		var crList rbacv1.ClusterRoleList
+		err := json.Unmarshal(buffer, &crList)
+		if err != nil {
+			log.Fatalf("Error parsing cluster role list: %v\n%v\n", err.Error(), buffer)
+		}
+		for _, cr := range crList.Items {
+			if resName == cr.Name {
+				s, err := describeClusterRole(&cr)
+				if err != nil {
+					log.Fatalf("Error generating output for cluster role %s: %s", cr.Name, err.Error())
+				}
+				printObject(s)
+				break
+			}
+		}
+	} else if inType(resType, "ClusterRoleBinding") && (kind == "ClusterRoleBindingList" || kind == "List") {
+		var crbList rbacv1.ClusterRoleBindingList
+		err := json.Unmarshal(buffer, &crbList)
+		if err != nil {
+			log.Fatalf("Error parsing cluster role binding list: %v\n%v\n", err.Error(), buffer)
+		}
+		for _, crb := range crbList.Items {
+			if resName == crb.Name {
+				s, err := describeClusterRoleBinding(&crb)
+				if err != nil {
+					log.Fatalf("Error generating output for cluster role binding %s: %s", crb.Name, err.Error())
+				}
+				printObject(s)
+				break
+			}
+		}
+	} else if inType(resType, "Pod") && (kind == "PodList" || kind == "List") {
+		var podList corev1.PodList
+		err := json.Unmarshal(buffer, &podList)
+		if err != nil {
+			log.Fatalf("Error parsing pod list: %v\n%v\n", err.Error(), buffer)
+		}
+		for _, pod := range podList.Items {
+			if resName == pod.Name && resNamespace == pod.Namespace {
+				s, err := DefaultObjectDescriber.DescribeObject(&pod)
+				if err != nil {
+					log.Fatalf("Error generating output for pod %s/%s: %s", pod.Namespace, pod.Name, err.Error())
+				}
+				printObject(s)
+				break
+			}
+		}
+	} else if inType(resType, "Service") && (kind == "ServiceList" || kind == "List") {
+		var svcList corev1.ServiceList
+		err := json.Unmarshal(buffer, &svcList)
+		if err != nil {
+			log.Fatalf("Error parsing service list: %v\n%v\n", err.Error(), buffer)
+		}
+		for _, svc := range svcList.Items {
+			if resName == svc.Name && resNamespace == svc.Namespace {
+				s, err := DefaultObjectDescriber.DescribeObject(&svc)
+				if err != nil {
+					log.Fatalf("Error generating output for service %s/%s: %s", svc.Namespace, svc.Name, err.Error())
+				}
+				printObject(s)
+				break
+			}
+		}
+	} else if inType(resType, "Deployment") && (kind == "DeploymentList" || kind == "List") {
+		var deployList appsv1.DeploymentList
+		err := json.Unmarshal(buffer, &deployList)
+		if err != nil {
+			log.Fatalf("Error parsing deployment list: %v\n%v\n", err.Error(), buffer)
+		}
+		for _, deploy := range deployList.Items {
+			if resName == deploy.Name && resNamespace == deploy.Namespace {
+				s, err := DefaultObjectDescriber.DescribeObject(&deploy)
+				if err != nil {
+					log.Fatalf("Error generating output for deployment %s/%s: %s", deploy.Namespace, deploy.Name, err.Error())
+				}
+				printObject(s)
+				break
+			}
+		}
+	} else if inType(resType, "DaemonSet") && (kind == "DaemonSetList" || kind == "List") {
+		var daemonList appsv1.DaemonSetList
+		err := json.Unmarshal(buffer, &daemonList)
+		if err != nil {
+			log.Fatalf("Error parsing daemonset list: %v\n%v\n", err.Error(), buffer)
+		}
+		for _, daemon := range daemonList.Items {
+			if resName == daemon.Name && resNamespace == daemon.Namespace {
+				s, err := DefaultObjectDescriber.DescribeObject(&daemon)
+				if err != nil {
+					log.Fatalf("Error generating output for daemonset %s/%s: %s", daemon.Namespace, daemon.Name, err.Error())
+				}
+				printObject(s)
+				break
+			}
+		}
+	} else if inType(resType, "ReplicaSet") && (kind == "ReplicaSetList" || kind == "List") {
+		var replicaList appsv1.ReplicaSetList
+		err := json.Unmarshal(buffer, &replicaList)
+		if err != nil {
+			log.Fatalf("Error parsing replicaset list: %v\n%v\n", err.Error(), buffer)
+		}
+		for _, rs := range replicaList.Items {
+			if resName == rs.Name && resNamespace == rs.Namespace {
+				s, err := DefaultObjectDescriber.DescribeObject(&rs)
+				if err != nil {
+					log.Fatalf("Error generating output for replicaset %s/%s: %s", rs.Namespace, rs.Name, err.Error())
+				}
+				printObject(s)
+				break
+			}
+		}
+	} else if inType(resType, "StatefulSet") && (kind == "StatefulSetList" || kind == "List") {
+		var stsList appsv1.StatefulSetList
+		err := json.Unmarshal(buffer, &stsList)
+		if err != nil {
+			log.Fatalf("Error parsing statefulset list: %v\n%v\n", err.Error(), buffer)
+		}
+		for _, sts := range stsList.Items {
+			if resName == sts.Name && resNamespace == sts.Namespace {
+				s, err := DefaultObjectDescriber.DescribeObject(&sts)
+				if err != nil {
+					log.Fatalf("Error generating output for statefulset %s/%s: %s", sts.Namespace, sts.Name, err.Error())
+				}
+				printObject(s)
+				break
+			}
+		}
+	} else if inType(resType, "PersistentVolumeClaim") && (kind == "PersistentVolumeClaimList" || kind == "List") {
+		var pvcList corev1.PersistentVolumeClaimList
+		err := json.Unmarshal(buffer, &pvcList)
+		if err != nil {
+			log.Fatalf("Error parsing pvc list: %v\n%v\n", err.Error(), buffer)
+		}
+		for _, pvc := range pvcList.Items {
+			if resName == pvc.Name && resNamespace == pvc.Namespace {
+				s, err := DefaultObjectDescriber.DescribeObject(&pvc)
+				if err != nil {
+					log.Fatalf("Error generating output for pvc %s/%s: %s", pvc.Namespace, pvc.Name, err.Error())
+				}
+				printObject(s)
+				break
+			}
+		}
+	} else if inType(resType, "ConfigMap") && (kind == "ConfigMapList" || kind == "List") {
+		var cmList corev1.ConfigMapList
+		err := json.Unmarshal(buffer, &cmList)
+		if err != nil {
+			log.Fatalf("Error parsing cm list: %v\n%v\n", err.Error(), buffer)
+		}
+		for _, cm := range cmList.Items {
+			if resName == cm.Name && resNamespace == cm.Namespace {
+				s, err := describeConfigMap(&cm)
+				if err != nil {
+					log.Fatalf("Error generating output for cm %s/%s: %s", cm.Namespace, cm.Name, err.Error())
+				}
+				printObject(s)
+				break
+			}
+		}
+	} else if inType(resType, "Secret") && (kind == "SecretList" || kind == "List") {
+		var secretList corev1.SecretList
+		err := json.Unmarshal(buffer, &secretList)
+		if err != nil {
+			log.Fatalf("Error parsing secret list: %v\n%v\n", err.Error(), buffer)
+		}
+		for _, scrt := range secretList.Items {
+			if resName == scrt.Name && resNamespace == scrt.Namespace {
+				s, err := DefaultObjectDescriber.DescribeObject(&scrt)
+				if err != nil {
+					log.Fatalf("Error generating output for secret %s/%s: %s", scrt.Namespace, scrt.Name, err.Error())
+				}
+				printObject(s)
+				break
+			}
+		}
+	} else if inType(resType, "ServiceAccount") && (kind == "ServiceAccountList" || kind == "List") {
+		var saList corev1.ServiceAccountList
+		err := json.Unmarshal(buffer, &saList)
+		if err != nil {
+			log.Fatalf("Error parsing sa list: %v\n%v\n", err.Error(), buffer)
+		}
+		for _, sa := range saList.Items {
+			if resName == sa.Name && resNamespace == sa.Namespace {
+				s, err := DefaultObjectDescriber.DescribeObject(&sa)
+				if err != nil {
+					log.Fatalf("Error generating output for sa %s/%s: %s", sa.Namespace, sa.Name, err.Error())
+				}
+				printObject(s)
+				break
+			}
+		}
+	} else if inType(resType, "Ingress") && (kind == "IngressList" || kind == "List") {
+		var ingList networkingv1.IngressList
+		err := json.Unmarshal(buffer, &ingList)
+		if err != nil {
+			log.Fatalf("Error parsing ingress list: %v\n%v\n", err.Error(), buffer)
+		}
+		for _, ing := range ingList.Items {
+			if resName == ing.Name && resNamespace == ing.Namespace {
+				s, err := describeIngressV1(&ing)
+				if err != nil {
+					log.Fatalf("Error generating output for ingress %s/%s: %s", ing.Namespace, ing.Name, err.Error())
+				}
+				printObject(s)
+				break
+			}
+		}
+	} else if inType(resType, "Endpoints") && (kind == "EndpointsList" || kind == "List") {
+		var epList corev1.EndpointsList
+		err := json.Unmarshal(buffer, &epList)
+		if err != nil {
+			log.Fatalf("Error parsing ep list: %v\n%v\n", err.Error(), buffer)
+		}
+		for _, ep := range epList.Items {
+			if resName == ep.Name && resNamespace == ep.Namespace {
+				s, err := DefaultObjectDescriber.DescribeObject(&ep)
+				if err != nil {
+					log.Fatalf("Error generating output for ep %s/%s: %s", ep.Namespace, ep.Name, err.Error())
+				}
+				printObject(s)
+				break
+			}
+		}
+	} else if inType(resType, "Job") && (kind == "JobList" || kind == "List") {
+		var jobList batchv1.JobList
+		err := json.Unmarshal(buffer, &jobList)
+		if err != nil {
+			log.Fatalf("Error parsing job list: %v\n%v\n", err.Error(), buffer)
+		}
+		for _, job := range jobList.Items {
+			if resName == job.Name && resNamespace == job.Namespace {
+				s, err := DefaultObjectDescriber.DescribeObject(&job)
+				if err != nil {
+					log.Fatalf("Error generating output for job %s/%s: %s", job.Namespace, job.Name, err.Error())
+				}
+				printObject(s)
+				break
+			}
+		}
+	} else if inType(resType, "CronJob") && (kind == "CronJobList" || kind == "List") {
+		var jobList batchv1.CronJobList
+		err := json.Unmarshal(buffer, &jobList)
+		if err != nil {
+			log.Fatalf("Error parsing cron job list: %v\n%v\n", err.Error(), buffer)
+		}
+		for _, job := range jobList.Items {
+			if resName == job.Name && resNamespace == job.Namespace {
+				s, err := DefaultObjectDescriber.DescribeObject(&job)
+				if err != nil {
+					log.Fatalf("Error generating output for cron job %s/%s: %s", job.Namespace, job.Name, err.Error())
+				}
+				printObject(s)
+				break
+			}
+		}
+	} else if inType(resType, "Role") && (kind == "RoleList" || kind == "List") {
+		var roleList rbacv1.RoleList
+		err := json.Unmarshal(buffer, &roleList)
+		if err != nil {
+			log.Fatalf("Error parsing role list: %v\n%v\n", err.Error(), buffer)
+		}
+		for _, role := range roleList.Items {
+			if resName == role.Name {
+				s, err := describeRole(&role)
+				if err != nil {
+					log.Fatalf("Error generating output for role %s: %s", role.Name, err.Error())
+				}
+				printObject(s)
+				break
+			}
+		}
+	} else if inType(resType, "RoleBinding") && (kind == "RoleBindingList" || kind == "List") {
+		var rbList rbacv1.RoleBindingList
+		err := json.Unmarshal(buffer, &rbList)
+		if err != nil {
+			log.Fatalf("Error parsing role binding list: %v\n%v\n", err.Error(), buffer)
+		}
+		for _, rb := range rbList.Items {
+			if resName == rb.Name {
+				s, err := describeRoleBinding(&rb)
+				if err != nil {
+					log.Fatalf("Error generating output for role binding %s: %s", rb.Name, err.Error())
+				}
+				printObject(s)
+				break
+			}
+		}
 	}
+	return !found
 }
 
 func describeRoleBinding(binding *rbacv1.RoleBinding) (string, error) {

@@ -11,13 +11,13 @@ import (
 	"github.com/spf13/cobra"
 )
 
-func prettyPrint(buffer string) {
+func prettyPrint(buffer []byte) bool {
 	var result map[string]interface{}
 	// fmt.Println(buffer)
-	err := json.Unmarshal([]byte(buffer), &result)
+	err := json.Unmarshal(buffer, &result)
 	if err != nil {
 		// log.Fatalf("Error processing buffer: %v\n%v\n", err.Error(), buffer)
-		return
+		return true
 	}
 	// fmt.Println("items: ", reflect.TypeOf(result["items"]).String())
 	kind := result["kind"]
@@ -25,7 +25,7 @@ func prettyPrint(buffer string) {
 		kind = resKind + "List"
 	}
 	if result["items"] == nil {
-		return
+		return true
 	}
 	if kind != nil && len(result["items"].([]interface{})) > 0 {
 		fmt.Println("Kind: ", kind)
@@ -78,6 +78,7 @@ func prettyPrint(buffer string) {
 		}
 		fmt.Println()
 	}
+	return true
 }
 
 var showCmd = &cobra.Command{

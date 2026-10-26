@@ -18,3 +18,5 @@ bin/
 dist/
 
 test/local-test.sh
+
+snap.login

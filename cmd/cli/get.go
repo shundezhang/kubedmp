@@ -18,16 +18,21 @@ var (
 )
 
 var getCmd = &cobra.Command{
-	Use:                   "get TYPE [-n NAMESPACE | -A]",
+	Use:                   "get TYPE [NAME] [-n NAMESPACE | -A]",
 	DisableFlagsInUseLine: true,
 	Short:                 "Display one or many resources",
 	Long: `Display one or many resources of a type. 
-Prints a table of the most important information about resources of the specific type.`,
+Prints a table of the most important information about resources of the specific type.
+
+A resource can be selected with either "TYPE NAME" or "TYPE/NAME".`,
 	Example: `  # Lists all pods in kube-system namespace in ps output format, the output contains all fields in 'kubectl get -o wide'
   kubedmp get po -n kube-system
   
   # List all nodes
-  kubedmp get no`,
+  kubedmp get no
+
+  # Show a pod using TYPE/NAME
+  kubedmp get pod/nginx -n default`,
 	// Args: cobra.MinimumNArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
 
@@ -36,12 +41,12 @@ Prints a table of the most important information about resources of the specific
 			return
 		}
 
-		resType = args[0]
-		resName = ""
-		if len(args) > 1 {
-			resName = args[1]
-		}
 		var err error
+		resType, resName, err = parseResourceArgs(args)
+		if err != nil {
+			log.Fatalf("%v\n", err)
+			return
+		}
 		resKind, err = getKind(resType)
 		if err != nil {
 			log.Fatalf("%s is not a supported resource type.\n", resType)
@@ -69,53 +74,67 @@ func init() {
 	getCmd.PersistentFlags().StringVarP(&dumpDir, dumpDirFlag, "d", "", "Path to dump directory")
 }
 
-func processDoc(buffer string) {
+func processDoc(buffer []byte) bool {
+	kind := docKind(buffer)
+	if kind == "" || !docMatchesKind(kind, resKind) {
+		return true
+	}
 	var result map[string]interface{}
 	// fmt.Println(buffer)
 	// fmt.Println("=====================================================\n===================================================")
-	err := json.Unmarshal([]byte(buffer), &result)
+	err := json.Unmarshal(buffer, &result)
 
 	if err != nil {
 		// log.Fatalf("Error processing buffer: %v\n%v\n", err.Error(), buffer)
-		return
+		return true
 	}
-	if result["kind"] == nil {
-		return
-	}
-	if result["items"] == nil {
-		return
+	items, ok := result["items"].([]interface{})
+	if !ok {
+		return true
 	}
 	// log.Print(resType+"/", resNamespace+"/", resName+"/", result["kind"].(string)+"/", resKind)
-	if result["kind"] == "List" {
-		for _, item := range result["items"].([]interface{}) {
-			obj := item.(map[string]interface{})
-			kind := obj["kind"]
-			if kind != resKind {
+	if kind == "List" {
+		for _, item := range items {
+			obj, ok := item.(map[string]interface{})
+			if !ok {
 				continue
 			}
-			metadata := obj["metadata"].(map[string]interface{})
-			objName := metadata["name"].(string)
+			if obj["kind"] != resKind {
+				continue
+			}
+			metadata, ok := obj["metadata"].(map[string]interface{})
+			if !ok {
+				continue
+			}
+			objName, _ := metadata["name"].(string)
 			if resName != "" && objName != resName {
 				continue
 			}
 			displayItems = append(displayItems, item)
 		}
 
-	} else if resKind == result["kind"].(string)[0:len(result["kind"].(string))-4] {
+	} else {
 		if contains(UnnamespacedTypes, resKind) {
-			for _, item := range result["items"].([]interface{}) {
-				obj := item.(map[string]interface{})
-				metadata := obj["metadata"].(map[string]interface{})
-				objName := metadata["name"].(string)
+			for _, item := range items {
+				obj, ok := item.(map[string]interface{})
+				if !ok {
+					continue
+				}
+				metadata, ok := obj["metadata"].(map[string]interface{})
+				if !ok {
+					continue
+				}
+				objName, _ := metadata["name"].(string)
 				if resName != "" && objName != resName {
 					continue
 				}
 				displayItems = append(displayItems, item)
 			}
 		} else {
-			findItems(result["items"].([]interface{}))
+			findItems(items)
 		}
 	}
+	return true
 }
 
 func findItems(items []interface{}) {
@@ -194,9 +213,7 @@ func traverseDir() {
 	}
 	filename := DumpFileNames[resKind]
 	// fmt.Println("filename: ", filename)
-	dumpDirPath, _ := filepath.Abs(dumpDir)
-	// fmt.Println("fullPath: ", dumpDirPath)
-	if strings.Contains(dumpDirPath, "sos_commands") && strings.Contains(dumpDirPath, "kubernetes") {
+	if isSosreportDir(dumpDir) {
 		subdirs, err1 := os.ReadDir(dumpDir)
 		if err1 != nil {
 			log.Fatalf("Error to open [dir=%v]: %v", dumpDir, err1.Error())

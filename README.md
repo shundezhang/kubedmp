@@ -43,9 +43,10 @@ Flags:
 ```
 Display one or many resources of a type. 
 Prints a table of the most important information about resources of the specific type.
+A resource can be selected with either "TYPE NAME" or "TYPE/NAME".
 
 Usage:
-  kubedmp get TYPE [-n NAMESPACE | -A]
+  kubedmp get TYPE [NAME] [-n NAMESPACE | -A]
 
 Examples:
   # Lists all pods in kube-system namespace in ps output format, the output contains all fields in 'kubectl get -o wide'
@@ -53,6 +54,9 @@ Examples:
   
   # List all nodes
   kubedmp get no
+
+  # Show a pod using TYPE/NAME
+  kubedmp get pod/nginx -n default
 
 Flags:
   -A, --all-namespaces     If present, list the requested object(s) across all namespaces.
@@ -62,10 +66,11 @@ Flags:
 ```
 * kubedmp describe
 ```
-Show details of a specific resource. Print a detailed description of the selected resource.
+Show details of a specific resource. Print a detailed description of the selected resource, including related events found in the dump.
+A resource can be selected with either "TYPE NAME" or "TYPE/NAME".
 
 Usage:
-  kubedmp describe TYPE RESOURCE_NAME [-n NAMESPACE]
+  kubedmp describe TYPE NAME | TYPE/NAME [-n NAMESPACE]
 
 Examples:
   # Describe a node
@@ -73,6 +78,9 @@ Examples:
   
   # Describe a pod in kube-system namespace
   $ kubedmp describe po coredns-6bcf44f4cc-j9wkq -n kube-system
+
+  # Describe a pod using TYPE/NAME
+  $ kubedmp describe pod/nginx -n default
 
 Flags:
   -d, --dumpdir string    Path to dump dir
@@ -83,22 +91,32 @@ Flags:
 ```
 Print the logs for a container in a pod or specified resource.
 If the pod has more than one container, and a container name is not specified, logs of all containers will be printed out.
+A deployment, daemonset or statefulset can be specified as TYPE/NAME to print the logs of all pods selected by that resource.
 
 Usage:
-  kubedmp logs POD_NAME [-n NAMESPACE] [-c CONTAINER_NAME]
+  kubedmp logs POD_NAME | TYPE/NAME [-n NAMESPACE] [-c CONTAINER_NAME]
 
 Examples:
   # Return logs from pod nginx with all containers
   kubedmp logs nginx
   
   # Return logs of ruby container logs from pod web-1
-  kubectl logs web-1 -c ruby
+  kubedmp logs web-1 -c ruby
+
+  # Return logs from all pods in deployment web in namespace prod
+  kubedmp logs deploy/web -n prod
+
+  # Return logs from all pods in daemonset fluentd in namespace logging
+  kubedmp logs ds/fluentd -n logging
+
+  # Return logs from all pods in statefulset db in namespace prod
+  kubedmp logs sts/db -n prod
 
 Flags:
   -c, --container string   container
   -d, --dumpdir string    Path to dump dir
   -f, --dumpfile string   Path to dump file (default "./cluster-info.dump")
-  -n, --namespace string   namespace of the pod (default "default")
+  -n, --namespace string   namespace of the pod or workload (default "default")
 ```
 * kubedmp show
 ```
